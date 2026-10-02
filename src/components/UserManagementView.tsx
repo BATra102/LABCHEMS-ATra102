@@ -20,8 +20,12 @@ import {
   ShieldCheck,
   Sliders,
   Gauge,
+  Trash2,
+  RotateCcw,
+  History,
 } from 'lucide-react';
 import { UserLimitsModal } from './modals/UserLimitsModal';
+import { DeleteManagerModal } from './modals/DeleteManagerModal';
 
 export const UserManagementView: React.FC = () => {
   const {
@@ -35,6 +39,8 @@ export const UserManagementView: React.FC = () => {
     changeUserRole,
     addUser,
     updateUser,
+    deleteDeactivatedManager,
+    restoreUser,
   } = useLab();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,6 +62,8 @@ export const UserManagementView: React.FC = () => {
 
   // Limits & Permissions Modal
   const [selectedUserForLimits, setSelectedUserForLimits] = useState<User | null>(null);
+  // Delete Manager Confirmation Modal (Mục 1, 2, 3, 4)
+  const [selectedUserForDeletion, setSelectedUserForDeletion] = useState<User | null>(null);
 
   const [notificationMsg, setNotificationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -82,17 +90,29 @@ export const UserManagementView: React.FC = () => {
     );
   }
 
+  const isDeletedTab = statusFilter === 'DELETED';
   const pendingUsers = users.filter((u) => u.status === 'PENDING');
+  const deletedUsers = users.filter((u) => u.status === 'DELETED');
 
   const filteredUsers = users.filter((u) => {
+    // 14. FILTER: Tài khoản DELETED mặc định KHÔNG xuất hiện trong danh sách User chính. Chỉ xuất hiện trong Lịch sử xóa.
+    if (!isDeletedTab && u.status === 'DELETED') {
+      return false;
+    }
+    if (isDeletedTab && u.status !== 'DELETED') {
+      return false;
+    }
+
     if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
-    if (statusFilter !== 'ALL' && u.status !== statusFilter) return false;
+    if (statusFilter !== 'ALL' && statusFilter !== 'DELETED' && u.status !== statusFilter) return false;
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       return (
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
-        u.department.toLowerCase().includes(q)
+        u.department.toLowerCase().includes(q) ||
+        (u.deleted_by_name && u.deleted_by_name.toLowerCase().includes(q))
       );
     }
     return true;
@@ -299,13 +319,98 @@ export const UserManagementView: React.FC = () => {
 
       {/* Table: User Management Matrix (Section 41) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* Status Tabs Navigation (Mục 7 & 14) */}
+        <div className="flex items-center gap-1.5 p-3 border-b border-slate-200 bg-slate-50/70 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ALL')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              statusFilter === 'ALL'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200 font-bold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <span>Tất cả</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 text-slate-700 font-mono">
+              {users.filter((u) => u.status !== 'DELETED').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ACTIVE')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              statusFilter === 'ACTIVE'
+                ? 'bg-white text-emerald-800 shadow-xs border border-slate-200 font-bold'
+                : 'text-slate-600 hover:text-emerald-700 hover:bg-white/60'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>Active</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-50 text-emerald-700 font-mono">
+              {users.filter((u) => u.status === 'ACTIVE').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('DEACTIVATED')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              statusFilter === 'DEACTIVATED'
+                ? 'bg-white text-rose-800 shadow-xs border border-slate-200 font-bold'
+                : 'text-slate-600 hover:text-rose-700 hover:bg-white/60'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500" />
+            <span>Deactivated</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-50 text-rose-700 font-mono">
+              {users.filter((u) => u.status === 'DEACTIVATED').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('PENDING')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              statusFilter === 'PENDING'
+                ? 'bg-white text-amber-800 shadow-xs border border-slate-200 font-bold'
+                : 'text-slate-600 hover:text-amber-700 hover:bg-white/60'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span>Pending</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-50 text-amber-700 font-mono">
+              {users.filter((u) => u.status === 'PENDING').length}
+            </span>
+          </button>
+
+          <div className="h-4 w-px bg-slate-300 mx-1 shrink-0" />
+
+          {/* Lịch sử xóa Tab (Mục 7: Lịch sử xóa) */}
+          <button
+            type="button"
+            onClick={() => setStatusFilter('DELETED')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              statusFilter === 'DELETED'
+                ? 'bg-rose-50 text-rose-900 shadow-xs border border-rose-300 font-bold ring-2 ring-rose-200/50'
+                : 'text-slate-600 hover:text-rose-700 hover:bg-rose-50/50'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 text-rose-600" />
+            <span>Lịch sử xóa</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-100 text-rose-800 font-mono font-bold">
+              {deletedUsers.length}
+            </span>
+          </button>
+        </div>
+
         {/* Filters & Search */}
-        <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="p-4 border-b border-slate-200 bg-white flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
             <input
               type="text"
-              placeholder="Tìm theo tên, email hoặc bộ môn..."
+              placeholder={isDeletedTab ? "Tìm trong lịch sử xóa..." : "Tìm theo tên, email hoặc bộ môn..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-hidden focus:border-purple-600"
@@ -331,12 +436,13 @@ export const UserManagementView: React.FC = () => {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
+                className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white font-medium"
               >
-                <option value="ALL">Tất cả</option>
+                <option value="ALL">Tất cả (Chưa xóa)</option>
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="PENDING">PENDING</option>
                 <option value="DEACTIVATED">DEACTIVATED</option>
+                <option value="DELETED">DELETED (Lịch sử xóa)</option>
               </select>
             </div>
           </div>
@@ -344,195 +450,310 @@ export const UserManagementView: React.FC = () => {
 
         {/* Table Content */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                <th className="py-3 px-4">Thành viên (Name)</th>
-                <th className="py-3 px-4">Email Google</th>
-                <th className="py-3 px-4">Vai trò (Role)</th>
-                <th className="py-3 px-4">Định mức & Hạn chế</th>
-                <th className="py-3 px-4">Trạng thái (Status)</th>
-                <th className="py-3 px-4">Lần đăng nhập cuối</th>
-                <th className="py-3 px-4 text-right">Thao tác (Actions)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">
-                    Không tìm thấy thành viên nào phù hợp bộ lọc.
-                  </td>
+          {isDeletedTab ? (
+            /* 7. TRANG LỊCH SỬ XÓA TABLE */
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-rose-200 bg-rose-50/50 text-[11px] font-bold text-rose-900 uppercase tracking-wider">
+                  <th className="py-3 px-4">Tên thành viên</th>
+                  <th className="py-3 px-4">Email Google</th>
+                  <th className="py-3 px-4">Vai trò (Role)</th>
+                  <th className="py-3 px-4">Trạng thái</th>
+                  <th className="py-3 px-4">Người thực hiện xóa</th>
+                  <th className="py-3 px-4">Thời gian xóa</th>
+                  <th className="py-3 px-4 text-right">Thao tác (Actions)</th>
                 </tr>
-              ) : (
-                filteredUsers.map((u) => {
-                  const isCurrent = u.id === currentUser.id;
-
-                  return (
-                    <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isCurrent ? 'bg-purple-50/20' : ''}`}>
-                      {/* Name */}
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                          <History className="w-6 h-6" />
+                        </div>
+                        <div className="font-semibold text-slate-600 text-sm">Chưa có tài khoản nào trong Lịch sử xóa</div>
+                        <p className="text-slate-400 text-xs max-w-sm">
+                          Khi một Quản lý (MANAGER) đã vô hiệu hóa bị xóa, tài khoản sẽ được lưu trữ an toàn tại đây và vẫn bảo toàn toàn bộ dữ liệu giao dịch.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((u) => (
+                    <tr key={u.id} className="hover:bg-rose-50/30 transition-colors">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center font-bold text-xs shrink-0">
                             {u.name.charAt(0)}
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                              <span>{u.name}</span>
-                              {isCurrent && (
-                                <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded text-[9px] font-bold">
-                                  Bạn
-                                </span>
-                              )}
-                            </div>
+                            <div className="font-bold text-slate-900">{u.name}</div>
                             <div className="text-[11px] text-slate-500">{u.department}</div>
                           </div>
                         </div>
                       </td>
 
-                      {/* Email */}
                       <td className="py-3 px-4 font-mono text-slate-700 text-[11px]">
                         {u.email}
                       </td>
 
-                      {/* Role Dropdown */}
                       <td className="py-3 px-4">
-                        <select
-                          value={u.role}
-                          onChange={(e) => {
-                            const newR = e.target.value as UserRole;
-                            const res = changeUserRole(u.id, newR);
-                            if (res.success) showMsg(res.message);
-                            else showMsg(res.message, 'error');
-                          }}
-                          className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-bold cursor-pointer transition-colors ${
-                            u.role === 'MANAGER' || u.role === 'ADMIN'
-                              ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                          }`}
-                        >
-                          <option value="USER">USER</option>
-                          <option value="MANAGER">MANAGER</option>
-                        </select>
+                        <span className="font-mono text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                          {u.role}
+                        </span>
                       </td>
 
-                      {/* Limits & Quotas summary column */}
                       <td className="py-3 px-4">
-                        {u.role === 'MANAGER' || u.role === 'ADMIN' ? (
-                          <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
-                            Toàn quyền (Không giới hạn)
-                          </span>
-                        ) : (
-                          <div className="space-y-0.5 text-[10px] font-mono">
-                            <div className="flex items-center gap-1 text-slate-700">
-                              <span className="text-slate-400">Dùng:</span>
-                              <span className="font-bold text-slate-900">{u.limits?.maxUsagePerTransaction != null ? `${u.limits.maxUsagePerTransaction} mL` : '∞'}</span>
-                              <span className="text-slate-300">/lần</span>
-                              <span className="text-slate-300">•</span>
-                              <span className="text-slate-400">Ngày:</span>
-                              <span className="font-bold text-purple-700">{u.limits?.dailyUsageLimit != null ? `${u.limits.dailyUsageLimit} mL` : '∞'}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-slate-500">
-                              <span>Số lần: {u.limits?.dailyTransactionCount != null ? `${u.limits.dailyTransactionCount} lần` : '∞'}</span>
-                              <span className="text-slate-300">•</span>
-                              <span>Nhập: {u.limits?.maxStockInQuantity != null ? `${u.limits.maxStockInQuantity} chai` : '∞'}</span>
-                            </div>
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono bg-rose-100 text-rose-800 border border-rose-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                          <span>ĐÃ XÓA</span>
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 text-xs">
+                        <div className="font-semibold text-slate-800">{u.deleted_by_name || 'Quản lý'}</div>
+                        {u.deletion_reason && (
+                          <div className="text-[10px] text-slate-500 italic truncate max-w-[200px]" title={u.deletion_reason}>
+                            Lý do: {u.deletion_reason}
                           </div>
                         )}
                       </td>
 
-                      {/* Status */}
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
-                            u.status === 'ACTIVE'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : u.status === 'PENDING'
-                              ? 'bg-amber-100 text-amber-800'
-                              : u.status === 'SUSPENDED'
-                              ? 'bg-orange-100 text-orange-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              u.status === 'ACTIVE'
-                                ? 'bg-emerald-600'
-                                : u.status === 'PENDING'
-                                ? 'bg-amber-600'
-                                : u.status === 'SUSPENDED'
-                                ? 'bg-orange-600'
-                                : 'bg-rose-600'
-                            }`}
-                          />
-                          <span>{u.status}</span>
-                        </span>
-                      </td>
-
-                      {/* Last Login */}
                       <td className="py-3 px-4 text-slate-500 text-[11px] font-mono">
-                        {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('vi-VN') : 'Chưa đăng nhập'}
+                        {u.deleted_at ? new Date(u.deleted_at).toLocaleString('vi-VN') : '—'}
                       </td>
 
-                      {/* Actions */}
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Limit & Permission Config Button */}
-                          <button
-                            onClick={() => setSelectedUserForLimits(u)}
-                            className="px-2.5 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 cursor-pointer flex items-center gap-1 transition-colors"
-                            title="Thiết lập giới hạn định mức & phân quyền"
-                          >
-                            <Sliders className="w-3.5 h-3.5" />
-                            <span>Hạn mức</span>
-                          </button>
-
-                          {u.status === 'PENDING' && (
-                            <button
-                              onClick={() => {
-                                const res = approveUser(u.id);
-                                if (res.success) showMsg(res.message);
-                              }}
-                              className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-300 cursor-pointer"
-                            >
-                              Duyệt
-                            </button>
-                          )}
-
-                          {u.status === 'ACTIVE' && (
-                            <button
-                              onClick={() => {
-                                if (confirm(`Bạn có chắc muốn vô hiệu hóa tài khoản "${u.name}"? Người dùng này sẽ không thể ghi nhận thêm giao dịch, nhưng lịch sử vẫn được giữ nguyên.`)) {
-                                  const res = deactivateUser(u.id);
-                                  if (res.success) showMsg(res.message);
-                                  else showMsg(res.message, 'error');
-                                }
-                              }}
-                              className="px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer"
-                              title="Vô hiệu hóa (Deactivate)"
-                            >
-                              Khóa
-                            </button>
-                          )}
-
-                          {u.status === 'DEACTIVATED' && (
-                            <button
-                              onClick={() => {
-                                const res = activateUser(u.id);
-                                if (res.success) showMsg(res.message);
-                              }}
-                              className="px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-50 rounded-lg border border-cyan-300 cursor-pointer"
-                            >
-                              Mở khóa
-                            </button>
-                          )}
-                        </div>
+                        {/* 8. KHÔI PHỤC BUTTON (DELETED -> DEACTIVATED) */}
+                        <button
+                          onClick={() => {
+                            const res = restoreUser(u.id);
+                            if (res.success) {
+                              showMsg(`✓ ${res.message}`);
+                            } else {
+                              showMsg(res.message, 'error');
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:text-cyan-800 bg-cyan-50 hover:bg-cyan-100 rounded-lg border border-cyan-300 cursor-pointer inline-flex items-center gap-1.5 transition-colors shadow-2xs"
+                          title="Khôi phục tài khoản về trạng thái DEACTIVATED"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Khôi phục</span>
+                        </button>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ))
+                )}
+              </tbody>
+            </table>
+          ) : (
+            /* NORMAL ACTIVE / PENDING / DEACTIVATED TABLE */
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                  <th className="py-3 px-4">Thành viên (Name)</th>
+                  <th className="py-3 px-4">Email Google</th>
+                  <th className="py-3 px-4">Vai trò (Role)</th>
+                  <th className="py-3 px-4">Định mức & Hạn chế</th>
+                  <th className="py-3 px-4">Trạng thái (Status)</th>
+                  <th className="py-3 px-4">Lần đăng nhập cuối</th>
+                  <th className="py-3 px-4 text-right">Thao tác (Actions)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-slate-400">
+                      Không tìm thấy thành viên nào phù hợp bộ lọc.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((u) => {
+                    const isCurrent = u.id === currentUser.id;
+
+                    return (
+                      <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isCurrent ? 'bg-purple-50/20' : ''}`}>
+                        {/* Name */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
+                              {u.name.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>{u.name}</span>
+                                {isCurrent && (
+                                  <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded text-[9px] font-bold">
+                                    Bạn
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500">{u.department}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Email */}
+                        <td className="py-3 px-4 font-mono text-slate-700 text-[11px]">
+                          {u.email}
+                        </td>
+
+                        {/* Role Dropdown */}
+                        <td className="py-3 px-4">
+                          <select
+                            value={u.role}
+                            onChange={(e) => {
+                              const newR = e.target.value as UserRole;
+                              const res = changeUserRole(u.id, newR);
+                              if (res.success) showMsg(res.message);
+                              else showMsg(res.message, 'error');
+                            }}
+                            className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-bold cursor-pointer transition-colors ${
+                              u.role === 'MANAGER' || u.role === 'ADMIN'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <option value="USER">USER</option>
+                            <option value="MANAGER">MANAGER</option>
+                          </select>
+                        </td>
+
+                        {/* Limits & Quotas summary column */}
+                        <td className="py-3 px-4">
+                          {u.role === 'MANAGER' || u.role === 'ADMIN' ? (
+                            <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
+                              Toàn quyền (Không giới hạn)
+                            </span>
+                          ) : (
+                            <div className="space-y-0.5 text-[10px] font-mono">
+                              <div className="flex items-center gap-1 text-slate-700">
+                                <span className="text-slate-400">Dùng:</span>
+                                <span className="font-bold text-slate-900">{u.limits?.maxUsagePerTransaction != null ? `${u.limits.maxUsagePerTransaction} mL` : '∞'}</span>
+                                <span className="text-slate-300">/lần</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-400">Ngày:</span>
+                                <span className="font-bold text-purple-700">{u.limits?.dailyUsageLimit != null ? `${u.limits.dailyUsageLimit} mL` : '∞'}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-slate-500">
+                                <span>Số lần: {u.limits?.dailyTransactionCount != null ? `${u.limits.dailyTransactionCount} lần` : '∞'}</span>
+                                <span className="text-slate-300">•</span>
+                                <span>Nhập: {u.limits?.maxStockInQuantity != null ? `${u.limits.maxStockInQuantity} chai` : '∞'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                              u.status === 'ACTIVE'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : u.status === 'PENDING'
+                                ? 'bg-amber-100 text-amber-800'
+                                : u.status === 'SUSPENDED'
+                                ? 'bg-orange-100 text-orange-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                u.status === 'ACTIVE'
+                                  ? 'bg-emerald-600'
+                                  : u.status === 'PENDING'
+                                  ? 'bg-amber-600'
+                                  : u.status === 'SUSPENDED'
+                                  ? 'bg-orange-600'
+                                  : 'bg-rose-600'
+                              }`}
+                            />
+                            <span>{u.status}</span>
+                          </span>
+                        </td>
+
+                        {/* Last Login */}
+                        <td className="py-3 px-4 text-slate-500 text-[11px] font-mono">
+                          {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('vi-VN') : 'Chưa đăng nhập'}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Limit & Permission Config Button */}
+                            <button
+                              onClick={() => setSelectedUserForLimits(u)}
+                              className="px-2.5 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 cursor-pointer flex items-center gap-1 transition-colors"
+                              title="Thiết lập giới hạn định mức & phân quyền"
+                            >
+                              <Sliders className="w-3.5 h-3.5" />
+                              <span>Hạn mức</span>
+                            </button>
+
+                            {u.status === 'PENDING' && (
+                              <button
+                                onClick={() => {
+                                  const res = approveUser(u.id);
+                                  if (res.success) showMsg(res.message);
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-300 cursor-pointer"
+                              >
+                                Duyệt
+                              </button>
+                            )}
+
+                            {u.status === 'ACTIVE' && (
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Bạn có chắc muốn vô hiệu hóa tài khoản "${u.name}"? Người dùng này sẽ không thể ghi nhận thêm giao dịch, nhưng lịch sử vẫn được giữ nguyên.`)) {
+                                    const res = deactivateUser(u.id);
+                                    if (res.success) showMsg(res.message);
+                                    else showMsg(res.message, 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer"
+                                title="Vô hiệu hóa (Deactivate)"
+                              >
+                                Khóa
+                              </button>
+                            )}
+
+                            {u.status === 'DEACTIVATED' && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    const res = activateUser(u.id);
+                                    if (res.success) showMsg(res.message);
+                                  }}
+                                  className="px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-50 rounded-lg border border-cyan-300 cursor-pointer"
+                                  title="Mở khóa tài khoản"
+                                >
+                                  Mở khóa
+                                </button>
+
+                                {/* 1, 2: NÚT XÓA CHỈ HIỂN THỊ ĐỐI VỚI MANAGER ĐÃ DEACTIVATED: [ Hạn mức ] [ Mở khóa ] [ 🗑 Xóa ] */}
+                                {(u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER') && (
+                                  <button
+                                    onClick={() => setSelectedUserForDeletion(u)}
+                                    className="px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer flex items-center gap-1 transition-colors"
+                                    title="Xóa tài khoản Manager đã Deactivated (Đưa vào Lịch sử xóa)"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Xóa</span>
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
@@ -583,6 +804,16 @@ export const UserManagementView: React.FC = () => {
         isOpen={!!selectedUserForLimits}
         user={selectedUserForLimits}
         onClose={() => setSelectedUserForLimits(null)}
+      />
+
+      {/* Delete Manager Confirmation Modal (Mục 3 & 4) */}
+      <DeleteManagerModal
+        isOpen={!!selectedUserForDeletion}
+        user={selectedUserForDeletion}
+        onClose={() => setSelectedUserForDeletion(null)}
+        onSuccess={(msg) => {
+          showMsg(`✓ Đã xóa tài khoản: ${msg}`);
+        }}
       />
     </div>
   );

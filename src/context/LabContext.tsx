@@ -91,7 +91,9 @@ interface LabContextType {
   changeUserRole: (userId: string, newRole: UserRole) => { success: boolean; message: string };
   addUser: (userData: Omit<User, 'id'>) => { success: boolean; message: string; user?: User };
   updateUser: (id: string, update: Partial<User>) => { success: boolean; message: string };
-  deleteUser: (id: string) => { success: boolean; message: string };
+  deleteUser: (id: string, reason?: string) => { success: boolean; message: string };
+  deleteDeactivatedManager: (userId: string, reason?: string) => { success: boolean; message: string };
+  restoreUser: (userId: string) => { success: boolean; message: string };
   updateUserLimits: (userId: string, limits: UserLimits) => { success: boolean; message: string };
   updateUserPermissions: (userId: string, permissions: UserPermissions) => { success: boolean; message: string };
 
@@ -817,6 +819,20 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const existing = users.find((u) => u.email.toLowerCase() === cleanEmail);
 
     if (existing) {
+      // 12. XỬ LÝ EMAIL GOOGLE: Nếu tài khoản đã bị xóa (DELETED) -> Không cho truy cập
+      if (existing.status === 'DELETED') {
+        logAudit(
+          'ĐĂNG NHẬP GOOGLE BỊ CHẶN (TÀI KHOẢN ĐÃ XÓA)',
+          'USER',
+          existing.id,
+          `Tài khoản đã bị xóa ${existing.email} (${existing.name}) cố gắng đăng nhập qua Google OAuth.`
+        );
+        return {
+          success: false,
+          message: 'Tài khoản này đã bị xóa khỏi hệ thống LabChem. Vui lòng liên hệ Manager để được cấp quyền lại.',
+        };
+      }
+
       // Section 42 & 58: Check if account is DEACTIVATED
       if (existing.status === 'DEACTIVATED') {
         logAudit(
@@ -1096,11 +1112,122 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true, message: 'Đã cập nhật thông tin thành viên.' };
   };
 
-  const deleteUser = (id: string) => {
-    if (!canManageUsers) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền.' };
+  // 1, 5, 6, 9, 10, 11: XÓA TÀI KHOẢN MANAGER ĐÃ DEACTIVATED (Soft delete)
+  const deleteDeactivatedManager = (userId: string, reason?: string) => {
+    // 10. CHỈ MANAGER CÓ QUYỀN XÓA (Backend / Context permission check)
+    if (!isManager) {
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền xóa tài khoản.' };
     }
-    return deactivateUser(id);
+
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { success: false, message: 'Không tìm thấy tài khoản người dùng cần xóa.' };
+    }
+
+    // 9. KHÔNG CHO TỰ XÓA TÀI KHOẢN CỦA CHÍNH MÌNH
+    if (target.id === currentUser.id) {
+      return { success: false, message: 'Quy định an toàn: Bạn không thể tự xóa tài khoản Manager của chính mình.' };
+    }
+
+    // 1. ĐIỀU KIỆN ĐƯỢC XÓA: role = MANAGER AND status = DEACTIVATED
+    const isTargetManager = target.role === 'MANAGER' || target.role === 'ADMIN' || target.role === 'LAB_MANAGER';
+    if (!isTargetManager) {
+      return {
+        success: false,
+        message: 'Chức năng này chỉ áp dụng cho tài khoản Quản lý (MANAGER). Không thể xóa tài khoản vai trò USER theo quy trình này.',
+      };
+    }
+
+    if (target.status !== 'DEACTIVATED') {
+      return {
+        success: false,
+        message: `Chỉ cho phép xóa tài khoản Manager khi đang ở trạng thái DEACTIVATED (Vô hiệu hóa). Trạng thái hiện tại: ${target.status}. Vui lòng Khóa/Vô hiệu hóa tài khoản trước.`,
+      };
+    }
+
+    // 9. KHÔNG CHO XÓA MANAGER CUỐI CÙNG CỦA HỆ THỐNG
+    const remainingActiveManagers = users.filter(
+      (u) => (u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER') && u.status === 'ACTIVE' && u.id !== userId
+    );
+    if (remainingActiveManagers.length === 0) {
+      return {
+        success: false,
+        message: 'Không thể xóa Manager cuối cùng của hệ thống. Phải có ít nhất một Manager đang hoạt động.',
+      };
+    }
+
+    // 6. SỬ DỤNG SOFT DELETE (Bảo toàn lịch sử giao dịch và logs)
+    const deletionTimestamp = new Date().toISOString();
+    const updatedUser: User = {
+      ...target,
+      status: 'DELETED',
+      deleted_at: deletionTimestamp,
+      deleted_by: currentUser.id,
+      deleted_by_name: currentUser.name,
+      deletion_reason: reason || 'Quản lý thực hiện xóa tài khoản Manager đã vô hiệu hóa',
+    };
+
+    setUsers((prev) => prev.map((u) => (u.id === userId ? updatedUser : u)));
+
+    // 11. AUDIT LOG
+    logAudit(
+      'DELETE_USER',
+      'USER',
+      userId,
+      `ACTION: DELETE_USER | TARGET: ${target.name} | TARGET EMAIL: ${target.email} | TARGET ROLE: ${target.role} | PERFORMED BY: ${currentUser.name} | PERFORMED AT: ${new Date().toLocaleString('vi-VN')} | STATUS: SUCCESS | REASON: ${reason || 'Xóa tài khoản Manager đã Deactivated'}`
+    );
+
+    // 13. UI SAU KHI XÓA
+    return {
+      success: true,
+      message: `${target.name} đã được đưa vào Lịch sử xóa. Lịch sử thao tác của tài khoản vẫn được bảo toàn.`,
+    };
+  };
+
+  // 8. KHÔI PHỤC TÀI KHOẢN (DELETED -> DEACTIVATED)
+  const restoreUser = (userId: string) => {
+    // 10. CHỈ MANAGER CÓ QUYỀN KHÔI PHỤC
+    if (!isManager) {
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền khôi phục tài khoản.' };
+    }
+
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { success: false, message: 'Không tìm thấy tài khoản người dùng.' };
+    }
+
+    if (target.status !== 'DELETED') {
+      return { success: false, message: `Tài khoản "${target.name}" không nằm trong danh sách đã xóa.` };
+    }
+
+    // Khi khôi phục: DELETED -> DEACTIVATED (Không tự động chuyển thành ACTIVE)
+    const updatedUser: User = {
+      ...target,
+      status: 'DEACTIVATED',
+      deleted_at: undefined,
+      deleted_by: undefined,
+      deleted_by_name: undefined,
+      deletion_reason: undefined,
+    };
+
+    setUsers((prev) => prev.map((u) => (u.id === userId ? updatedUser : u)));
+
+    // 11. AUDIT LOG
+    logAudit(
+      'RESTORE_USER',
+      'USER',
+      userId,
+      `ACTION: RESTORE_USER | TARGET: ${target.name} | TARGET EMAIL: ${target.email} | TARGET ROLE: ${target.role} | PERFORMED BY: ${currentUser.name} | PERFORMED AT: ${new Date().toLocaleString('vi-VN')} | STATUS: SUCCESS | CHUYỂN VỀ: DEACTIVATED`
+    );
+
+    return {
+      success: true,
+      message: `Đã khôi phục tài khoản "${target.name}" về trạng thái DEACTIVATED (Vô hiệu hóa). Bạn có thể bấm "Mở khóa" nếu muốn kích hoạt lại.`,
+    };
+  };
+
+  const deleteUser = (id: string, reason?: string) => {
+    return deleteDeactivatedManager(id, reason);
   };
 
   const updateUserLimits = (userId: string, limits: UserLimits) => {
@@ -3099,6 +3226,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addUser,
         updateUser,
         deleteUser,
+        deleteDeactivatedManager,
+        restoreUser,
         updateUserLimits,
         updateUserPermissions,
 

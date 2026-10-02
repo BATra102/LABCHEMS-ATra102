@@ -1,5 +1,5 @@
 export type UserRole = 'MANAGER' | 'USER' | 'ADMIN' | 'LAB_MANAGER' | 'MEMBER';
-export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'DELETED';
 
 export interface UserLimits {
   maxUsagePerTransaction?: number | null; // mL per transaction (e.g. 100 mL), null = unlimited
@@ -59,6 +59,10 @@ export interface User {
   position?: string;
   limits?: UserLimits;
   permissions?: UserPermissions;
+  deleted_at?: string;
+  deleted_by?: string;
+  deleted_by_name?: string;
+  deletion_reason?: string;
 }
 
 export type ChemicalGrade = 
