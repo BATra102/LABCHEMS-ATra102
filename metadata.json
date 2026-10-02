@@ -1,0 +1,8 @@
+{
+  "name": "LabChemAnhtra102",
+  "description": "Hệ thống quản lý hóa chất phòng thí nghiệm theo dõi tồn kho theo từng chai, cảnh báo hạn dùng, lịch sử sử dụng theo dự án và tự động lập danh sách mua sắm.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
