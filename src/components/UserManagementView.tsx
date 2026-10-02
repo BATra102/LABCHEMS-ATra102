@@ -23,9 +23,12 @@ import {
   Trash2,
   RotateCcw,
   History,
+  Edit,
+  Building,
 } from 'lucide-react';
 import { UserLimitsModal } from './modals/UserLimitsModal';
 import { DeleteManagerModal } from './modals/DeleteManagerModal';
+import { EditUserModal, PRESET_DEPARTMENTS } from './modals/EditUserModal';
 
 export const UserManagementView: React.FC = () => {
   const {
@@ -39,6 +42,9 @@ export const UserManagementView: React.FC = () => {
     changeUserRole,
     addUser,
     updateUser,
+    changeUserDepartment,
+    canManageTargetUser,
+    deleteUser,
     deleteDeactivatedManager,
     restoreUser,
   } = useLab();
@@ -46,6 +52,7 @@ export const UserManagementView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | UserStatus>('ALL');
+  const [departmentFilter, setDepartmentFilter] = useState<'ALL' | string>('ALL');
 
   // Form states
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -60,10 +67,10 @@ export const UserManagementView: React.FC = () => {
   const [editRole, setEditRole] = useState<UserRole>('USER');
   const [editDept, setEditDept] = useState('');
 
-  // Limits & Permissions Modal
+  // Modals state
   const [selectedUserForLimits, setSelectedUserForLimits] = useState<User | null>(null);
-  // Delete Manager Confirmation Modal (Mục 1, 2, 3, 4)
   const [selectedUserForDeletion, setSelectedUserForDeletion] = useState<User | null>(null);
+  const [selectedUserForEdit, setSelectedUserForEdit] = useState<User | null>(null);
 
   const [notificationMsg, setNotificationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -105,6 +112,7 @@ export const UserManagementView: React.FC = () => {
 
     if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
     if (statusFilter !== 'ALL' && statusFilter !== 'DELETED' && u.status !== statusFilter) return false;
+    if (departmentFilter !== 'ALL' && u.department !== departmentFilter) return false;
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -112,6 +120,7 @@ export const UserManagementView: React.FC = () => {
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
         u.department.toLowerCase().includes(q) ||
+        (u.manager_name && u.manager_name.toLowerCase().includes(q)) ||
         (u.deleted_by_name && u.deleted_by_name.toLowerCase().includes(q))
       );
     }

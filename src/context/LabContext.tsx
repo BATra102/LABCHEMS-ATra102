@@ -91,6 +91,8 @@ interface LabContextType {
   changeUserRole: (userId: string, newRole: UserRole) => { success: boolean; message: string };
   addUser: (userData: Omit<User, 'id'>) => { success: boolean; message: string; user?: User };
   updateUser: (id: string, update: Partial<User>) => { success: boolean; message: string };
+  changeUserDepartment: (userId: string, newDepartment: string) => { success: boolean; message: string };
+  canManageTargetUser: (target: User) => { allowed: boolean; message: string };
   deleteUser: (id: string, reason?: string) => { success: boolean; message: string };
   deleteDeactivatedManager: (userId: string, reason?: string) => { success: boolean; message: string };
   restoreUser: (userId: string) => { success: boolean; message: string };
@@ -1011,12 +1013,66 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true, message: `Đã từ chối tài khoản ${target.name}.` };
   };
 
+  // 1 & 2: PHÂN CẤP QUYỀN & XÁC ĐỊNH ACCOUNT THUỘC QUYỀN MANAGER
+  const isSuperAdmin =
+    currentUser.role === 'ADMIN' ||
+    currentUser.email.toLowerCase() === DEFAULT_MANAGER_EMAIL.toLowerCase();
+
+  const canManageTargetUser = (target: User): { allowed: boolean; message: string } => {
+    if (!isManager) {
+      return {
+        allowed: false,
+        message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền quản lý thành viên.',
+      };
+    }
+
+    if (isSuperAdmin) {
+      return { allowed: true, message: '' };
+    }
+
+    // Không thể can thiệp vào tài khoản Super Admin / Quản trị viên cấp cao
+    if (target.role === 'ADMIN') {
+      return {
+        allowed: false,
+        message: 'ACCESS DENIED: 403 Forbidden. Không có quyền sửa đổi hoặc xóa Quản trị viên cấp cao (ADMIN).',
+      };
+    }
+
+    // Không được tự ý sửa/xóa Manager khác (trừ khi là chính mình hoặc quy trình xóa Manager đã Deactivated hợp lệ)
+    if (
+      (target.role === 'MANAGER' || target.role === 'LAB_MANAGER') &&
+      target.id !== currentUser.id
+    ) {
+      return {
+        allowed: false,
+        message: 'ACCESS DENIED: 403 Forbidden. Không được tự ý sửa đổi hoặc can thiệp tài khoản của Quản lý khác.',
+      };
+    }
+
+    // Đối với User thông thường: Phải thuộc quyền quản lý của Manager hiện tại (user.manager_id = current_manager.id)
+    if (target.role === 'USER' || target.role === 'MEMBER') {
+      if (target.manager_id && target.manager_id !== currentUser.id) {
+        return {
+          allowed: false,
+          message: `ACCESS DENIED: 403 Forbidden. Thành viên "${target.name}" thuộc phạm vi quản lý của ${target.manager_name || 'Manager khác'}. Bạn không có thẩm quyền thao tác.`,
+        };
+      }
+    }
+
+    return { allowed: true, message: '' };
+  };
+
   const deactivateUser = (userId: string) => {
     if (!isManager) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền vô hiệu hóa.' };
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền vô hiệu hóa.' };
     }
     const target = users.find((u) => u.id === userId);
     if (!target) return { success: false, message: 'Không tìm thấy người dùng.' };
+
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
 
     // Section 59: Prevent deactivating the last active Manager!
     if (target.role === 'MANAGER' && target.status === 'ACTIVE') {
@@ -1032,39 +1088,54 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     logAudit(
-      'DEACTIVATE USER',
+      'KHÓA TÀI KHOẢN',
       'USER',
       userId,
-      `${currentUser.name} đã vô hiệu hóa tài khoản ${target.name} (${target.email}). Toàn bộ lịch sử sử dụng được bảo toàn.`
+      `ACTION: LOCK_USER | TARGET: ${target.name} (${target.email}) | BỘ MÔN: ${target.department} | THỰC HIỆN BỞI: ${currentUser.name} | THỜI GIAN: ${new Date().toLocaleString('vi-VN')}`
     );
     return {
       success: true,
-      message: `Đã vô hiệu hóa tài khoản "${target.name}". Tài khoản này không thể ghi nhận thêm giao dịch, nhưng lịch sử dữ liệu được bảo toàn.`,
+      message: `Đã khóa tài khoản "${target.name}". Tài khoản này không thể đăng nhập hoặc thực hiện giao dịch, nhưng lịch sử sử dụng được bảo toàn.`,
     };
   };
 
   const activateUser = (userId: string) => {
     if (!isManager) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền kích hoạt.' };
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền kích hoạt.' };
     }
     const target = users.find((u) => u.id === userId);
     if (!target) return { success: false, message: 'Không tìm thấy người dùng.' };
+
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
 
     setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'ACTIVE' as UserStatus } : u)));
     if (currentUser.id === userId) {
       setCurrentUser((prev) => ({ ...prev, status: 'ACTIVE' }));
     }
 
-    logAudit('ACTIVATE USER', 'USER', userId, `${currentUser.name} đã kích hoạt lại tài khoản ${target.name} (${target.email}).`);
-    return { success: true, message: `Đã kích hoạt lại tài khoản "${target.name}".` };
+    logAudit(
+      'MỞ KHÓA TÀI KHOẢN',
+      'USER',
+      userId,
+      `ACTION: UNLOCK_USER | TARGET: ${target.name} (${target.email}) | BỘ MÔN: ${target.department} | THỰC HIỆN BỞI: ${currentUser.name} | THỜI GIAN: ${new Date().toLocaleString('vi-VN')}`
+    );
+    return { success: true, message: `Đã mở khóa tài khoản "${target.name}".` };
   };
 
   const changeUserRole = (userId: string, newRole: UserRole) => {
     if (!isManager) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền cấp hoặc đổi vai trò.' };
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền cấp hoặc đổi vai trò.' };
     }
     const target = users.find((u) => u.id === userId);
     if (!target) return { success: false, message: 'Không tìm thấy người dùng.' };
+
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
 
     // Section 59: Prevent demoting the last manager
     if (target.role === 'MANAGER' && newRole === 'USER') {
@@ -1085,31 +1156,80 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addUser = (userData: Omit<User, 'id'>) => {
     if (!canManageUsers) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền thêm thành viên mới.' };
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền thêm thành viên mới.' };
     }
     const newId = `user-${Date.now().toString(36)}`;
     const newUser: User = {
       ...userData,
       id: newId,
+      manager_id: userData.manager_id || currentUser.id,
+      manager_name: userData.manager_name || currentUser.name,
       status: userData.status || 'ACTIVE',
       dateJoined: userData.dateJoined || new Date().toISOString().split('T')[0],
       lastLogin: new Date().toISOString(),
     };
     setUsers((prev) => [...prev, newUser]);
-    logAudit('Thêm người dùng', 'USER', newId, `${currentUser.name} đã thêm thành viên: ${newUser.name} (${newUser.role})`);
+    logAudit('Thêm người dùng', 'USER', newId, `${currentUser.name} đã thêm thành viên: ${newUser.name} (${newUser.role}, ${newUser.department})`);
     return { success: true, message: `Đã thêm thành viên "${newUser.name}".`, user: newUser };
   };
 
+  // 4, 5, 7, 8: CẬP NHẬT THÔNG TIN THÀNH VIÊN & CHUYỂN BỘ MÔN
   const updateUser = (id: string, update: Partial<User>) => {
-    if (!canManageUsers) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền sửa thông tin thành viên.' };
+    if (!isManager) {
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền sửa thông tin thành viên.' };
     }
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...update } : u)));
+    const target = users.find((u) => u.id === id);
+    if (!target) return { success: false, message: 'Không tìm thấy thành viên.' };
+
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
+
+    // Bảo vệ không cho thay đổi email Google định danh trừ khi Super Admin
+    const safeUpdate = { ...update };
+    delete (safeUpdate as any).id;
+    if (safeUpdate.email && safeUpdate.email.trim().toLowerCase() !== target.email.toLowerCase() && !isSuperAdmin) {
+      delete safeUpdate.email;
+    }
+
+    const oldDept = target.department;
+    const isDeptChanged = safeUpdate.department && safeUpdate.department !== oldDept;
+
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...safeUpdate } : u)));
     if (currentUser.id === id) {
-      setCurrentUser((prev) => ({ ...prev, ...update }));
+      setCurrentUser((prev) => ({ ...prev, ...safeUpdate }));
     }
-    logAudit('Cập nhật người dùng', 'USER', id, `${currentUser.name} đã sửa thông tin thành viên ID ${id}`);
-    return { success: true, message: 'Đã cập nhật thông tin thành viên.' };
+
+    // Lập chi tiết thay đổi để ghi Audit Log (Mục 8)
+    const changeLogs: string[] = [];
+    if (safeUpdate.name && safeUpdate.name !== target.name) changeLogs.push(`Tên: "${target.name}" → "${safeUpdate.name}"`);
+    if (isDeptChanged) changeLogs.push(`Bộ môn: "${oldDept}" → "${safeUpdate.department}"`);
+    if (safeUpdate.position !== undefined && safeUpdate.position !== target.position) changeLogs.push(`Chức danh: "${target.position || 'Chưa có'}" → "${safeUpdate.position}"`);
+    if (safeUpdate.phone !== undefined && safeUpdate.phone !== target.phone) changeLogs.push(`SĐT: "${target.phone || 'Chưa có'}" → "${safeUpdate.phone}"`);
+    if (safeUpdate.member_code !== undefined && safeUpdate.member_code !== target.member_code) changeLogs.push(`Mã TV: "${target.member_code || 'Chưa có'}" → "${safeUpdate.member_code}"`);
+    if (safeUpdate.notes !== undefined && safeUpdate.notes !== target.notes) changeLogs.push(`Ghi chú: "${safeUpdate.notes}"`);
+    if (safeUpdate.manager_id && safeUpdate.manager_id !== target.manager_id) changeLogs.push(`Manager phụ trách: "${target.manager_name || 'Chưa có'}" → "${safeUpdate.manager_name || safeUpdate.manager_id}"`);
+
+    const logDetails = changeLogs.length > 0 ? changeLogs.join(', ') : 'Cập nhật thông tin hồ sơ';
+
+    logAudit(
+      isDeptChanged ? 'CHUYỂN BỘ MÔN' : 'UPDATE_USER',
+      'USER',
+      id,
+      `ACTION: ${isDeptChanged ? 'CHANGE_DEPARTMENT' : 'UPDATE_USER'} | USER: ${target.name} (${target.email}) | ${logDetails} | CHANGED BY: ${currentUser.name} | TIME: ${new Date().toLocaleString('vi-VN')}`
+    );
+
+    return {
+      success: true,
+      message: isDeptChanged
+        ? `Đã chuyển thành viên "${target.name}" sang bộ môn "${safeUpdate.department}".`
+        : `Đã cập nhật thông tin thành viên "${target.name}".`,
+    };
+  };
+
+  const changeUserDepartment = (userId: string, newDepartment: string) => {
+    return updateUser(userId, { department: newDepartment });
   };
 
   // 1, 5, 6, 9, 10, 11: XÓA TÀI KHOẢN MANAGER ĐÃ DEACTIVATED (Soft delete)
@@ -1184,6 +1304,60 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // 12, 13, 16, 17, 18, 19: XÓA ACCOUNT THUỘC QUYỀN QUẢN LÝ (Soft Delete)
+  const deleteUser = (userId: string, reason?: string) => {
+    if (!isManager) {
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền xóa tài khoản.' };
+    }
+
+    const target = users.find((u) => u.id === userId);
+    if (!target) return { success: false, message: 'Không tìm thấy tài khoản người dùng cần xóa.' };
+
+    if (target.id === currentUser.id) {
+      return { success: false, message: 'Quy định an toàn: Bạn không thể tự xóa tài khoản của chính mình.' };
+    }
+
+    // Nếu là Manager: phải là Deactivated Manager và tuân theo quy tắc an toàn
+    if (target.role === 'MANAGER' || target.role === 'ADMIN' || target.role === 'LAB_MANAGER') {
+      if (target.role === 'ADMIN') {
+        return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Không thể xóa tài khoản Quản trị viên cấp cao (ADMIN).' };
+      }
+      return deleteDeactivatedManager(userId, reason);
+    }
+
+    // Nếu là User: Kiểm tra quyền quản lý (Section 12: target.manager_id = current_user.id)
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
+
+    // Soft Delete (Bảo toàn nguyên vẹn lịch sử giao dịch và logs)
+    const deletionTimestamp = new Date().toISOString();
+    const updatedUser: User = {
+      ...target,
+      status: 'DELETED',
+      deleted_at: deletionTimestamp,
+      deleted_by: currentUser.id,
+      deleted_by_name: currentUser.name,
+      deletion_reason: reason || 'Xóa account thuộc phạm vi quản lý',
+    };
+
+    setUsers((prev) => prev.map((u) => (u.id === userId ? updatedUser : u)));
+
+    // 17. AUDIT LOG KHI XÓA
+    logAudit(
+      'DELETE_USER',
+      'USER',
+      userId,
+      `ACTION: DELETE_USER | TARGET: ${target.name} | TARGET EMAIL: ${target.email} | TARGET DEPARTMENT: ${target.department} | DELETED BY: ${currentUser.name} | DELETED AT: ${new Date().toLocaleString('vi-VN')} | REASON: ${reason || 'Xóa thành viên thuộc quyền quản lý'}`
+    );
+
+    return {
+      success: true,
+      message: `Thành viên "${target.name}" đã được đưa vào Lịch sử xóa. Lịch sử sử dụng và giao dịch vẫn được bảo toàn nguyên vẹn.`,
+    };
+  };
+
   // 8. KHÔI PHỤC TÀI KHOẢN (DELETED -> DEACTIVATED)
   const restoreUser = (userId: string) => {
     // 10. CHỈ MANAGER CÓ QUYỀN KHÔI PHỤC
@@ -1198,6 +1372,16 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (target.status !== 'DELETED') {
       return { success: false, message: `Tài khoản "${target.name}" không nằm trong danh sách đã xóa.` };
+    }
+
+    // Kiểm tra quyền khôi phục (nếu là user thì phải thuộc quyền hoặc admin)
+    if (target.role === 'USER' || target.role === 'MEMBER') {
+      if (target.manager_id && target.manager_id !== currentUser.id && !isSuperAdmin) {
+        return {
+          success: false,
+          message: `ACCESS DENIED: 403 Forbidden. Bạn không có quyền khôi phục tài khoản thuộc Manager khác.`,
+        };
+      }
     }
 
     // Khi khôi phục: DELETED -> DEACTIVATED (Không tự động chuyển thành ACTIVE)
@@ -1226,16 +1410,17 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const deleteUser = (id: string, reason?: string) => {
-    return deleteDeactivatedManager(id, reason);
-  };
-
   const updateUserLimits = (userId: string, limits: UserLimits) => {
     if (!isManager) {
-      return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý mới có quyền thiết lập giới hạn cho thành viên.' };
+      return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý mới có quyền thiết lập giới hạn cho thành viên.' };
     }
     const target = users.find((u) => u.id === userId);
     if (!target) return { success: false, message: 'Không tìm thấy thành viên.' };
+
+    const check = canManageTargetUser(target);
+    if (!check.allowed) {
+      return { success: false, message: check.message };
+    }
 
     setUsers((prev) =>
       prev.map((u) => (u.id === userId ? { ...u, limits: { ...u.limits, ...limits } } : u))
@@ -3225,6 +3410,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         changeUserRole,
         addUser,
         updateUser,
+        changeUserDepartment,
+        canManageTargetUser,
         deleteUser,
         deleteDeactivatedManager,
         restoreUser,

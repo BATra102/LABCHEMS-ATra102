@@ -27,7 +27,7 @@ export const DeleteManagerModal: React.FC<Props> = ({
   onClose,
   onSuccess,
 }) => {
-  const { deleteDeactivatedManager, currentUser, users } = useLab();
+  const { deleteUser, currentUser, users, canManageTargetUser } = useLab();
 
   const [confirmEmail, setConfirmEmail] = useState('');
   const [reason, setReason] = useState('');
@@ -45,6 +45,8 @@ export const DeleteManagerModal: React.FC<Props> = ({
 
   if (!isOpen || !user) return null;
 
+  const isTargetManager = user.role === 'MANAGER' || user.role === 'ADMIN' || user.role === 'LAB_MANAGER';
+
   // Validation rules
   const isEmailMatching = confirmEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
   const isSelf = user.id === currentUser.id;
@@ -55,7 +57,9 @@ export const DeleteManagerModal: React.FC<Props> = ({
       u.status === 'ACTIVE' &&
       u.id !== user.id
   );
-  const isLastActiveManager = remainingActiveManagers.length === 0;
+  const isLastActiveManager = isTargetManager && remainingActiveManagers.length === 0;
+
+  const permCheck = canManageTargetUser(user);
 
   const handleDelete = () => {
     if (!isEmailMatching) {
@@ -64,7 +68,7 @@ export const DeleteManagerModal: React.FC<Props> = ({
     }
 
     if (isSelf) {
-      setErrorMsg('Bạn không thể tự xóa tài khoản Manager của chính mình.');
+      setErrorMsg('Bạn không thể tự xóa tài khoản của chính mình.');
       return;
     }
 
@@ -73,10 +77,15 @@ export const DeleteManagerModal: React.FC<Props> = ({
       return;
     }
 
+    if (!permCheck.allowed) {
+      setErrorMsg(permCheck.message);
+      return;
+    }
+
     setIsDeleting(true);
     setErrorMsg(null);
 
-    const res = deleteDeactivatedManager(user.id, reason.trim() || 'Xóa tài khoản Manager đã Deactivated');
+    const res = deleteUser(user.id, reason.trim() || (isTargetManager ? 'Xóa tài khoản Manager đã Deactivated' : 'Xóa tài khoản thành viên thuộc quyền'));
 
     setIsDeleting(false);
     if (res.success) {
@@ -99,7 +108,7 @@ export const DeleteManagerModal: React.FC<Props> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                <span>⚠ Xóa tài khoản Manager?</span>
+                <span>⚠ {isTargetManager ? 'Xóa tài khoản Manager?' : 'Xóa tài khoản thành viên?'}</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 Chuyển tài khoản vào Lịch sử xóa (Soft Delete) & bảo toàn toàn bộ dữ liệu lịch sử
@@ -137,30 +146,35 @@ export const DeleteManagerModal: React.FC<Props> = ({
 
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/80 text-[11px]">
               <div>
+                <span className="text-slate-400">Bộ môn:</span>{' '}
+                <span className="font-bold text-slate-800">{user.department}</span>
+              </div>
+              <div>
                 <span className="text-slate-400">Vai trò:</span>{' '}
                 <span className="font-bold text-purple-700 font-mono">{user.role}</span>
               </div>
-              <div>
-                <span className="text-slate-400">Trạng thái:</span>{' '}
-                <span className="font-bold text-rose-700 font-mono bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                  {user.status}
-                </span>
-              </div>
             </div>
+
+            {user.manager_name && (
+              <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/50">
+                <span>Manager phụ trách: </span>
+                <strong className="text-slate-700 font-mono">{user.manager_name}</strong>
+              </div>
+            )}
           </div>
 
-          {/* Safety Notice Callout */}
+          {/* Safety Notice Callout (Section 13, 16, 18) */}
           <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-1.5 text-slate-700">
             <div className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
               <ShieldAlert className="w-4 h-4 text-amber-600" />
               <span>Chính sách bảo toàn lịch sử phòng lab</span>
             </div>
             <p className="text-[11px] leading-relaxed text-slate-600">
-              Tài khoản này hiện đã bị vô hiệu hóa (DEACTIVATED). Việc xóa tài khoản sẽ loại tài khoản này khỏi danh sách người dùng đang hoạt động.
+              Lịch sử sử dụng hóa chất, nhập kho và giao dịch của tài khoản <strong>sẽ được giữ lại nguyên vẹn</strong> mang tên <strong>{user.name}</strong>. Tài khoản sẽ không thể đăng nhập sau khi xóa.
             </p>
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50/80 p-2 rounded-lg border border-emerald-200">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Lịch sử thao tác (ghi dùng hóa chất, nhập kho, duyệt đơn) của tài khoản vẫn được bảo toàn nguyên vẹn.</span>
+              <span>Dữ liệu vẫn được giữ trong "Lịch sử xóa" và có thể khôi phục lại khi cần.</span>
             </div>
           </div>
 
@@ -213,7 +227,7 @@ export const DeleteManagerModal: React.FC<Props> = ({
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="VD: Quản lý nghỉ việc / Chuyển công tác..."
+              placeholder="VD: Nghỉ việc / Chuyển công tác / Hoàn thành đề tài..."
               className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs bg-white focus:outline-hidden focus:border-slate-400"
             />
           </div>
@@ -233,9 +247,9 @@ export const DeleteManagerModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={handleDelete}
-            disabled={!isEmailMatching || isDeleting || isSelf || isLastActiveManager}
+            disabled={!isEmailMatching || isDeleting || isSelf || isLastActiveManager || !permCheck.allowed}
             className={`px-4 py-2 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-xs ${
-              !isEmailMatching || isSelf || isLastActiveManager
+              !isEmailMatching || isSelf || isLastActiveManager || !permCheck.allowed
                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 : 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer active:scale-95'
             }`}

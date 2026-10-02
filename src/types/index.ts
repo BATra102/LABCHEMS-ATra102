@@ -57,6 +57,11 @@ export interface User {
   dateJoined?: string;
   lastLogin?: string;
   position?: string;
+  phone?: string;
+  member_code?: string;
+  notes?: string;
+  manager_id?: string;
+  manager_name?: string;
   limits?: UserLimits;
   permissions?: UserPermissions;
   deleted_at?: string;
