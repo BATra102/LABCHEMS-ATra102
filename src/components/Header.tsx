@@ -212,17 +212,17 @@ export const Header: React.FC<Props> = ({
             <button
               onClick={() => setActiveTab('dashboard')}
               className="text-left flex items-center gap-2 sm:gap-2.5 cursor-pointer group"
-              title="Về Trang chủ LabChem"
+              title="Về Trang chủ LabChems Anhtra102"
             >
               <div className="w-8 h-8 rounded-xl bg-linear-to-br from-cyan-600 to-teal-700 text-white flex items-center justify-center font-black text-sm shadow-2xs group-hover:scale-105 transition-transform shrink-0">
                 LC
               </div>
               <div className="flex flex-col whitespace-nowrap">
                 <span className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 leading-none group-hover:text-cyan-700 transition-colors">
-                  LabChem
+                  LabChems
                 </span>
-                <span className="text-[10px] font-medium tracking-wider text-slate-400 uppercase mt-0.5">
-                  Inventory
+                <span className="text-base sm:text-lg font-extrabold tracking-tight text-cyan-700 leading-none mt-0.5 sm:mt-1">
+                  Anhtra102
                 </span>
               </div>
             </button>

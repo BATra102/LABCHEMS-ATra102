@@ -72,8 +72,8 @@ export const MobileMenuDrawer: React.FC<Props> = ({
               LC
             </div>
             <div>
-              <div className="font-extrabold text-sm text-slate-900">LabChem</div>
-              <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Inventory · Menu</div>
+              <div className="font-extrabold text-sm text-slate-900">LabChems</div>
+              <div className="text-[10px] font-mono text-cyan-700 font-bold">Anhtra102 · Menu</div>
             </div>
           </div>
 
