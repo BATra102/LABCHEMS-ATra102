@@ -1,5 +1,5 @@
 export type UserRole = 'MANAGER' | 'USER' | 'ADMIN' | 'LAB_MANAGER' | 'MEMBER';
-export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'DELETED';
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'DELETED';
 
 export interface UserLimits {
   maxUsagePerTransaction?: number | null; // mL per transaction (e.g. 100 mL), null = unlimited
@@ -45,6 +45,27 @@ export interface ApprovalRequest {
   resolutionNotes?: string;
 }
 
+export type LocationRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface LocationChangeRequest {
+  id: string;
+  userId: string;
+  userName?: string;
+  userEmail?: string;
+  bottleId: string;
+  bottleCode?: string;
+  chemicalId?: string;
+  chemicalName?: string;
+  currentLocation: string;
+  requestedLocation: string;
+  reason?: string;
+  status: LocationRequestStatus;
+  managerId?: string;
+  managerName?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -54,6 +75,7 @@ export interface User {
   department: string;
   googleId?: string;
   picture?: string;
+  avatar_url?: string;
   dateJoined?: string;
   lastLogin?: string;
   position?: string;
@@ -64,10 +86,10 @@ export interface User {
   manager_name?: string;
   limits?: UserLimits;
   permissions?: UserPermissions;
-  deleted_at?: string;
-  deleted_by?: string;
-  deleted_by_name?: string;
-  deletion_reason?: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deleted_by_name?: string | null;
+  deletion_reason?: string | null;
 }
 
 export type ChemicalGrade = 
@@ -229,7 +251,7 @@ export interface ChemicalSafety {
   sdsUrl?: string;
 }
 
-export type ChemicalStatus = 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+export type ChemicalStatus = 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' | 'DISPOSED';
 
 export interface Chemical {
   id: string;

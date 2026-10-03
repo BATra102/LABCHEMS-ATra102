@@ -367,7 +367,7 @@ export const EditUserModal: React.FC<Props> = ({
               <select
                 value={managerId}
                 onChange={(e) => setManagerId(e.target.value)}
-                disabled={currentUser.role !== 'ADMIN' && user.manager_id && user.manager_id !== currentUser.id}
+                disabled={Boolean(currentUser.role !== 'ADMIN' && user.manager_id && user.manager_id !== currentUser.id)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 font-medium"
               >
                 {activeManagers.map((m) => (

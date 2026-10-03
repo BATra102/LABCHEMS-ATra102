@@ -24,6 +24,7 @@ import {
   User as UserIcon,
   LogOut,
   Menu as MenuIcon,
+  Database,
 } from 'lucide-react';
 import { getStockStatusLabel } from '../utils/status';
 
@@ -51,6 +52,7 @@ interface Props {
   onSearchSubmit?: (query: string) => void;
   onOpenQrScanner?: () => void;
   onOpenUserGuide?: () => void;
+  onOpenSupabaseConfig?: () => void;
 }
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -88,6 +90,7 @@ export const Header: React.FC<Props> = ({
   onSearchSubmit,
   onOpenQrScanner,
   onOpenUserGuide,
+  onOpenSupabaseConfig,
 }) => {
   const {
     chemicals,
@@ -103,6 +106,9 @@ export const Header: React.FC<Props> = ({
     emailAlertLogs,
     getChemicalTotalStock,
     getChemicalStockStatus,
+    isSupabaseConfigured,
+    isRealtimeActive,
+    isSyncing,
   } = useLab();
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -194,10 +200,10 @@ export const Header: React.FC<Props> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-3">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6">
+        <div className="flex items-center justify-between h-16 gap-2 lg:gap-3 w-full min-w-0">
           {/* Zone 1: Wordmark & Mobile Hamburger */}
-          <div className="flex items-center gap-2 sm:gap-6 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {onOpenMobileMenu && (
               <button
                 type="button"
@@ -211,17 +217,17 @@ export const Header: React.FC<Props> = ({
 
             <button
               onClick={() => setActiveTab('dashboard')}
-              className="text-left flex items-center gap-2 sm:gap-2.5 cursor-pointer group"
+              className="text-left flex items-center gap-2 cursor-pointer group"
               title="Về Trang chủ LabChems Anhtra102"
             >
               <div className="w-8 h-8 rounded-xl bg-linear-to-br from-cyan-600 to-teal-700 text-white flex items-center justify-center font-black text-sm shadow-2xs group-hover:scale-105 transition-transform shrink-0">
                 LC
               </div>
               <div className="flex flex-col whitespace-nowrap">
-                <span className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 leading-none group-hover:text-cyan-700 transition-colors">
+                <span className="text-sm sm:text-base font-extrabold tracking-tight text-slate-900 leading-none group-hover:text-cyan-700 transition-colors">
                   LabChems
                 </span>
-                <span className="text-base sm:text-lg font-extrabold tracking-tight text-cyan-700 leading-none mt-0.5 sm:mt-1">
+                <span className="text-xs sm:text-sm font-bold tracking-tight text-cyan-700 leading-none mt-0.5">
                   Anhtra102
                 </span>
               </div>
@@ -229,14 +235,14 @@ export const Header: React.FC<Props> = ({
           </div>
 
           {/* Zone 2: Navigation Links (Section 1: Role-based Navigation) */}
-          <nav className="hidden lg:flex items-center space-x-1 shrink-0">
+          <nav className="hidden lg:flex items-center gap-1 shrink-0">
             {isManager ? (
               <>
                 <button
                   onClick={() => setActiveTab('dashboard')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'dashboard'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
@@ -244,9 +250,9 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('inventory')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'inventory'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
@@ -254,34 +260,34 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('usage')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'usage'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
-                  Lịch Sử Dùng
+                  Lịch Sử
                 </button>
                 <button
                   onClick={() => setActiveTab('purchase')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors relative cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors relative cursor-pointer ${
                     activeTab === 'purchase'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
-                  Mua Sắm & Nhập
+                  Mua Sắm
                   {pendingPurchasesCount > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-mono rounded-full font-bold">
+                    <span className="ml-1 px-1.5 py-0.2 bg-rose-500 text-white text-[10px] font-mono rounded-full font-bold">
                       {pendingPurchasesCount}
                     </span>
                   )}
                 </button>
                 <button
                   onClick={() => setActiveTab('expiry')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'expiry'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
@@ -289,14 +295,14 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('users')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-xl transition-colors flex items-center gap-1 cursor-pointer ${
                     activeTab === 'users'
-                      ? 'bg-purple-100 text-purple-900 font-semibold'
+                      ? 'bg-purple-100 text-purple-900 font-bold'
                       : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50'
                   }`}
                 >
                   <Users className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Quản Lý User</span>
+                  <span>Users</span>
                   {pendingUsersCount > 0 && (
                     <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] font-mono rounded-full font-bold animate-pulse">
                       {pendingUsersCount}
@@ -305,14 +311,15 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('settings')}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-2 py-1.5 text-xs font-medium rounded-xl transition-colors flex items-center gap-1 cursor-pointer ${
                     activeTab === 'settings'
-                      ? 'bg-slate-100 text-slate-900 font-semibold'
+                      ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
+                  title="Cài đặt hệ thống"
                 >
                   <Settings className="w-3.5 h-3.5" />
-                  <span>Cài Đặt</span>
+                  <span className="hidden xl:inline">Cài Đặt</span>
                 </button>
               </>
             ) : (
@@ -320,7 +327,7 @@ export const Header: React.FC<Props> = ({
               <>
                 <button
                   onClick={() => setActiveTab('dashboard')}
-                  className={`px-3.5 py-2 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'dashboard'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -330,7 +337,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('inventory')}
-                  className={`px-3.5 py-2 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'inventory'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -340,14 +347,14 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => onOpenRecordUsage()}
-                  className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Ghi sử dụng</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('usage')}
-                  className={`px-3.5 py-2 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                     activeTab === 'usage'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -360,9 +367,9 @@ export const Header: React.FC<Props> = ({
           </nav>
 
           {/* Zone 3: Global Header Search Bar */}
-          <div ref={searchRef} className="relative flex-1 max-w-xs md:max-w-sm lg:max-w-md hidden sm:block">
+          <div ref={searchRef} className="relative flex-1 min-w-[120px] max-w-[180px] md:max-w-[220px] lg:max-w-[240px] xl:max-w-[300px] hidden sm:block">
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
@@ -374,8 +381,8 @@ export const Header: React.FC<Props> = ({
                   if (searchQuery.trim()) setIsSearchOpen(true);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Tìm nhanh theo tên hóa chất hoặc số CAS..."
-                className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-100 hover:bg-slate-100/90 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
+                placeholder="Tìm nhanh hóa chất, CAS..."
+                className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-100 hover:bg-slate-100/90 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
               />
               {searchQuery && (
                 <button
@@ -453,56 +460,51 @@ export const Header: React.FC<Props> = ({
           </div>
 
           {/* Zone 4: Action Buttons, Notification Center, User Profile */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* QR Scanner Trigger (Desktop only) */}
-            {onOpenQrScanner && (
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Supabase Cloud & Realtime Status Badge */}
+            {onOpenSupabaseConfig && (
               <button
-                onClick={onOpenQrScanner}
-                className="hidden md:flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-xl transition-all shadow-md hover:shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 cursor-pointer ring-1 ring-cyan-400/40 group"
-                title="Quét mã QR chai hóa chất bằng Camera"
+                onClick={onOpenSupabaseConfig}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 py-1.5 sm:px-2.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer shrink-0 ${
+                  isSupabaseConfigured
+                    ? isRealtimeActive
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                      : 'bg-teal-50 text-teal-800 border-teal-300 hover:bg-teal-100'
+                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                }`}
+                title={
+                  isSupabaseConfigured
+                    ? isRealtimeActive
+                      ? 'Supabase Cloud Realtime đang hoạt động đồng bộ trực tiếp!'
+                      : 'Supabase Cloud đã cấu hình (đang kết nối kênh Realtime)'
+                    : 'Bấm để cấu hình kết nối Supabase Cloud Database'
+                }
               >
-                <QrCode className="w-4 h-4 text-cyan-100 group-hover:rotate-12 transition-transform" />
-                <span>Quét QR</span>
-              </button>
-            )}
-
-            {/* Record Usage (Desktop only) */}
-            <button
-              onClick={() => onOpenRecordUsage()}
-              className="hidden md:flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all shadow-md hover:shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 cursor-pointer ring-1 ring-emerald-400/40 group"
-              title="Ghi nhận sử dụng và trừ tồn kho chai"
-            >
-              <Plus className="w-4 h-4 text-emerald-100 group-hover:scale-125 transition-transform" />
-              <span>+ Ghi Sử Dụng</span>
-            </button>
-
-            {/* User Guide Trigger */}
-            {onOpenUserGuide && (
-              <button
-                onClick={onOpenUserGuide}
-                className="hidden xl:flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors shadow-2xs cursor-pointer group"
-                title="Xem hướng dẫn sử dụng website LabChem"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-cyan-700 group-hover:scale-110 transition-transform" />
-                <span>Hướng Dẫn</span>
-              </button>
-            )}
-
-            {/* Stock In (Manager Only) */}
-            {isManager && (
-              <button
-                onClick={() => onOpenStockIn()}
-                className="hidden xl:flex items-center gap-1 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-              >
-                <span>Nhập Kho</span>
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    isSupabaseConfigured
+                      ? isRealtimeActive
+                        ? 'bg-emerald-500 animate-pulse'
+                        : 'bg-teal-500'
+                      : 'bg-amber-500'
+                  }`}
+                />
+                <Database className="w-3.5 h-3.5 text-slate-700 shrink-0" />
+                <span className="hidden xl:inline">
+                  {isSupabaseConfigured
+                    ? isRealtimeActive
+                      ? 'Realtime'
+                      : 'Cloud'
+                    : 'Supabase'}
+                </span>
               </button>
             )}
 
             {/* NOTIFICATION CENTER BELL (Section 60 & Email Alerts) */}
-            <div ref={notifRef} className="relative">
+            <div ref={notifRef} className="relative shrink-0">
               <button
                 onClick={() => setNotifDropdownOpen(!notifDropdownOpen)}
-                className="relative p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                className="relative p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer shrink-0"
                 title="Trung tâm thông báo & Email cảnh báo"
               >
                 <Bell className="w-4 h-4" />
@@ -600,10 +602,10 @@ export const Header: React.FC<Props> = ({
             </div>
 
             {/* USER PROFILE & SIGN IN WITH GOOGLE */}
-            <div ref={userMenuRef} className="relative">
+            <div ref={userMenuRef} className="relative shrink-0">
               <button
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1.5 text-xs text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+                className="flex items-center gap-1.5 sm:gap-2 p-1 sm:px-2 sm:py-1 text-xs text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer shrink-0"
               >
                 <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden text-slate-800">
                   {currentUser.picture ? (
@@ -612,8 +614,8 @@ export const Header: React.FC<Props> = ({
                     currentUser.name.charAt(0)
                   )}
                 </div>
-                <div className="text-left hidden md:block">
-                  <div className="font-bold text-slate-900 leading-none truncate max-w-[110px] flex items-center gap-1">
+                <div className="text-left hidden lg:block">
+                  <div className="font-bold text-slate-900 leading-none truncate max-w-[85px] xl:max-w-[110px] flex items-center gap-1">
                     <span>{currentUser.name}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
@@ -631,7 +633,7 @@ export const Header: React.FC<Props> = ({
                     )}
                   </div>
                 </div>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
 
               {userDropdownOpen && (

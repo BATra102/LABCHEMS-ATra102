@@ -561,36 +561,46 @@ export const UserManagementView: React.FC = () => {
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                  <th className="py-3 px-4">Thành viên (Name)</th>
-                  <th className="py-3 px-4">Email Google</th>
-                  <th className="py-3 px-4">Vai trò (Role)</th>
-                  <th className="py-3 px-4">Định mức & Hạn chế</th>
-                  <th className="py-3 px-4">Trạng thái (Status)</th>
-                  <th className="py-3 px-4">Lần đăng nhập cuối</th>
-                  <th className="py-3 px-4 text-right">Thao tác (Actions)</th>
+                  <th className="py-3 px-4">THÀNH VIÊN</th>
+                  <th className="py-3 px-4">EMAIL GOOGLE</th>
+                  <th className="py-3 px-4">VAI TRÒ</th>
+                  <th className="py-3 px-4">BỘ MÔN</th>
+                  <th className="py-3 px-4">ĐỊNH MỨC & HẠN CHẾ</th>
+                  <th className="py-3 px-4">TRẠNG THÁI</th>
+                  <th className="py-3 px-4">LẦN ĐĂNG NHẬP</th>
+                  <th className="py-3 px-4 text-right">THAO TÁC</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400">
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
                       Không tìm thấy thành viên nào phù hợp bộ lọc.
                     </td>
                   </tr>
                 ) : (
                   filteredUsers.map((u) => {
                     const isCurrent = u.id === currentUser.id;
+                    const isTargetManager = u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER';
+                    const perm = canManageTargetUser(u);
+                    const canEditUser = currentUser.role === 'ADMIN' || isCurrent || (!isTargetManager && perm.allowed);
+                    const canManageLimits = !isTargetManager && perm.allowed;
+                    const canLockUser = currentUser.role === 'ADMIN' || (!isTargetManager && perm.allowed);
+                    const canDeleteUser =
+                      !isCurrent &&
+                      u.role !== 'ADMIN' &&
+                      (isTargetManager ? u.status === 'DEACTIVATED' : perm.allowed);
 
                     return (
                       <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isCurrent ? 'bg-purple-50/20' : ''}`}>
-                        {/* Name */}
+                        {/* THÀNH VIÊN */}
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
                               {u.name.charAt(0)}
                             </div>
                             <div>
-                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                                 <span>{u.name}</span>
                                 {isCurrent && (
                                   <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded text-[9px] font-bold">
@@ -598,55 +608,71 @@ export const UserManagementView: React.FC = () => {
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-500">{u.department}</div>
+                              {u.manager_name && (
+                                <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                  <span>QL:</span>
+                                  <span className={u.manager_id === currentUser.id ? "font-semibold text-purple-700" : "text-slate-600"}>
+                                    {u.manager_name}
+                                  </span>
+                                  {u.manager_id === currentUser.id && (
+                                    <span className="text-[9px] bg-purple-50 text-purple-700 px-1 rounded font-medium">
+                                      Thuộc quyền
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {u.position && (
+                                <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[140px]">{u.position}</div>
+                              )}
                             </div>
                           </div>
                         </td>
 
-                        {/* Email */}
-                        <td className="py-3 px-4 font-mono text-slate-700 text-[11px]">
+                        {/* EMAIL GOOGLE */}
+                        <td className="py-3 px-4 font-mono text-slate-700 text-[11px] whitespace-nowrap">
                           {u.email}
                         </td>
 
-                        {/* Role Dropdown */}
-                        <td className="py-3 px-4">
-                          <select
-                            value={u.role}
-                            onChange={(e) => {
-                              const newR = e.target.value as UserRole;
-                              const res = changeUserRole(u.id, newR);
-                              if (res.success) showMsg(res.message);
-                              else showMsg(res.message, 'error');
-                            }}
-                            className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-bold cursor-pointer transition-colors ${
+                        {/* VAI TRÒ */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold border ${
                               u.role === 'MANAGER' || u.role === 'ADMIN'
-                                ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : 'bg-slate-50 text-slate-700 border-slate-200'
                             }`}
                           >
-                            <option value="USER">USER</option>
-                            <option value="MANAGER">MANAGER</option>
-                          </select>
+                            {u.role}
+                          </span>
                         </td>
 
-                        {/* Limits & Quotas summary column */}
+                        {/* BỘ MÔN */}
+                        <td className="py-3 px-4 text-xs">
+                          <div className="font-medium text-slate-800 flex items-center gap-1.5">
+                            <Building className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate max-w-[170px]" title={u.department}>
+                              {u.department}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* ĐỊNH MỨC & HẠN CHẾ */}
                         <td className="py-3 px-4">
                           {u.role === 'MANAGER' || u.role === 'ADMIN' ? (
-                            <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
+                            <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100 whitespace-nowrap">
                               Toàn quyền (Không giới hạn)
                             </span>
                           ) : (
-                            <div className="space-y-0.5 text-[10px] font-mono">
+                            <div className="space-y-0.5 text-[10px] font-mono whitespace-nowrap">
                               <div className="flex items-center gap-1 text-slate-700">
                                 <span className="text-slate-400">Dùng:</span>
                                 <span className="font-bold text-slate-900">{u.limits?.maxUsagePerTransaction != null ? `${u.limits.maxUsagePerTransaction} mL` : '∞'}</span>
-                                <span className="text-slate-300">/lần</span>
                                 <span className="text-slate-300">•</span>
                                 <span className="text-slate-400">Ngày:</span>
                                 <span className="font-bold text-purple-700">{u.limits?.dailyUsageLimit != null ? `${u.limits.dailyUsageLimit} mL` : '∞'}</span>
                               </div>
                               <div className="flex items-center gap-1 text-slate-500">
-                                <span>Số lần: {u.limits?.dailyTransactionCount != null ? `${u.limits.dailyTransactionCount} lần` : '∞'}</span>
+                                <span>{u.limits?.dailyTransactionCount != null ? `${u.limits.dailyTransactionCount} lần/ngày` : '∞ lần'}</span>
                                 <span className="text-slate-300">•</span>
                                 <span>Nhập: {u.limits?.maxStockInQuantity != null ? `${u.limits.maxStockInQuantity} chai` : '∞'}</span>
                               </div>
@@ -654,8 +680,8 @@ export const UserManagementView: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Status */}
-                        <td className="py-3 px-4">
+                        {/* TRẠNG THÁI */}
+                        <td className="py-3 px-4 whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
                               u.status === 'ACTIVE'
@@ -682,33 +708,63 @@ export const UserManagementView: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Last Login */}
-                        <td className="py-3 px-4 text-slate-500 text-[11px] font-mono">
+                        {/* LẦN ĐĂNG NHẬP */}
+                        <td className="py-3 px-4 text-slate-500 text-[11px] font-mono whitespace-nowrap">
                           {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('vi-VN') : 'Chưa đăng nhập'}
                         </td>
 
-                        {/* Actions */}
-                        <td className="py-3 px-4 text-right">
+                        {/* THAO TÁC */}
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
-                            {/* Limit & Permission Config Button */}
+                            {/* [ Chỉnh sửa ] */}
+                            <button
+                              onClick={() => setSelectedUserForEdit(u)}
+                              disabled={!canEditUser}
+                              className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors inline-flex items-center gap-1 ${
+                                canEditUser
+                                  ? 'text-slate-700 bg-white hover:bg-slate-100 hover:text-slate-900 border-slate-200 cursor-pointer shadow-2xs'
+                                  : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed opacity-50'
+                              }`}
+                              title={canEditUser ? 'Chỉnh sửa thông tin & chuyển bộ môn' : 'Không có quyền chỉnh sửa tài khoản này'}
+                            >
+                              <Edit className="w-3 h-3 text-slate-500" />
+                              <span>Chỉnh sửa</span>
+                            </button>
+
+                            {/* [ Hạn mức ] */}
                             <button
                               onClick={() => setSelectedUserForLimits(u)}
-                              className="px-2.5 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 cursor-pointer flex items-center gap-1 transition-colors"
-                              title="Thiết lập giới hạn định mức & phân quyền"
+                              disabled={!canManageLimits}
+                              className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors inline-flex items-center gap-1 ${
+                                canManageLimits
+                                  ? 'text-purple-700 bg-purple-50 hover:bg-purple-100 border-purple-200 cursor-pointer shadow-2xs'
+                                  : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed opacity-50'
+                              }`}
+                              title={
+                                u.role === 'MANAGER' || u.role === 'ADMIN'
+                                  ? 'Tài khoản Quản trị toàn quyền (không giới hạn)'
+                                  : canManageLimits
+                                  ? 'Thiết lập định mức & phân quyền'
+                                  : 'Không có quyền sửa hạn mức'
+                              }
                             >
-                              <Sliders className="w-3.5 h-3.5" />
+                              <Sliders className="w-3 h-3" />
                               <span>Hạn mức</span>
                             </button>
 
+                            {/* [ Khóa ] / [ Mở khóa ] / [ Duyệt ] */}
                             {u.status === 'PENDING' && (
                               <button
                                 onClick={() => {
                                   const res = approveUser(u.id);
                                   if (res.success) showMsg(res.message);
+                                  else showMsg(res.message, 'error');
                                 }}
-                                className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-300 cursor-pointer"
+                                className="px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-300 cursor-pointer inline-flex items-center gap-1 shadow-2xs"
+                                title="Phê duyệt tài khoản"
                               >
-                                Duyệt
+                                <Check className="w-3 h-3" />
+                                <span>Duyệt</span>
                               </button>
                             )}
 
@@ -721,38 +777,49 @@ export const UserManagementView: React.FC = () => {
                                     else showMsg(res.message, 'error');
                                   }
                                 }}
-                                className="px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer"
-                                title="Vô hiệu hóa (Deactivate)"
+                                disabled={!canLockUser || isCurrent}
+                                className={`px-2 py-1 text-[11px] font-medium rounded-lg border transition-colors inline-flex items-center gap-1 ${
+                                  canLockUser && !isCurrent
+                                    ? 'text-rose-600 hover:bg-rose-50 border-rose-200 cursor-pointer'
+                                    : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed opacity-50'
+                                }`}
+                                title={isCurrent ? 'Không thể tự khóa tài khoản của chính mình' : canLockUser ? 'Khóa tài khoản' : 'Không có quyền khóa tài khoản này'}
                               >
-                                Khóa
+                                <Lock className="w-3 h-3" />
+                                <span>Khóa</span>
                               </button>
                             )}
 
                             {u.status === 'DEACTIVATED' && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    const res = activateUser(u.id);
-                                    if (res.success) showMsg(res.message);
-                                  }}
-                                  className="px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-50 rounded-lg border border-cyan-300 cursor-pointer"
-                                  title="Mở khóa tài khoản"
-                                >
-                                  Mở khóa
-                                </button>
+                              <button
+                                onClick={() => {
+                                  const res = activateUser(u.id);
+                                  if (res.success) showMsg(res.message);
+                                  else showMsg(res.message, 'error');
+                                }}
+                                disabled={!canLockUser}
+                                className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors inline-flex items-center gap-1 ${
+                                  canLockUser
+                                    ? 'text-cyan-700 hover:bg-cyan-50 border-cyan-300 cursor-pointer'
+                                    : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed opacity-50'
+                                }`}
+                                title={canLockUser ? 'Mở khóa tài khoản' : 'Không có quyền mở khóa tài khoản này'}
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Mở khóa</span>
+                              </button>
+                            )}
 
-                                {/* 1, 2: NÚT XÓA CHỈ HIỂN THỊ ĐỐI VỚI MANAGER ĐÃ DEACTIVATED: [ Hạn mức ] [ Mở khóa ] [ 🗑 Xóa ] */}
-                                {(u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER') && (
-                                  <button
-                                    onClick={() => setSelectedUserForDeletion(u)}
-                                    className="px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer flex items-center gap-1 transition-colors"
-                                    title="Xóa tài khoản Manager đã Deactivated (Đưa vào Lịch sử xóa)"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Xóa</span>
-                                  </button>
-                                )}
-                              </>
+                            {/* [ Xóa ] */}
+                            {canDeleteUser && (
+                              <button
+                                onClick={() => setSelectedUserForDeletion(u)}
+                                className="px-2 py-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-rose-200 cursor-pointer inline-flex items-center gap-1 transition-colors shadow-2xs"
+                                title="Xóa tài khoản thuộc phạm vi quản lý (Chuyển vào Lịch sử xóa & bảo toàn dữ liệu)"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Xóa</span>
+                              </button>
                             )}
                           </div>
                         </td>
@@ -813,6 +880,16 @@ export const UserManagementView: React.FC = () => {
         isOpen={!!selectedUserForLimits}
         user={selectedUserForLimits}
         onClose={() => setSelectedUserForLimits(null)}
+      />
+
+      {/* Edit User Modal */}
+      <EditUserModal
+        isOpen={!!selectedUserForEdit}
+        user={selectedUserForEdit}
+        onClose={() => setSelectedUserForEdit(null)}
+        onSaved={(msg) => {
+          showMsg(`✓ ${msg}`);
+        }}
       />
 
       {/* Delete Manager Confirmation Modal (Mục 3 & 4) */}

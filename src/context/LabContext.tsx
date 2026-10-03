@@ -45,6 +45,12 @@ import {
   calculateBottleStatus,
   calculateRecommendedPurchase,
 } from '../utils/status';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { chemicalService, rowToChemical } from '../services/chemicalService';
+import { bottleService, rowToBottle } from '../services/bottleService';
+import { usageService, rowToUsageTransaction } from '../services/usageService';
+import { authService } from '../services/authService';
+import { auditService } from '../services/auditService';
 
 const STORAGE_KEY = 'labchem_inventory_v1';
 export const DEFAULT_MANAGER_EMAIL = 'buianhtra2021@gmail.com';
@@ -242,6 +248,12 @@ interface LabContextType {
   clearAllData: () => void;
   exportDatabaseJSON: () => string;
   importDatabaseJSON: (jsonStr: string) => { success: boolean; message: string };
+
+  // Supabase Cloud Database & Realtime
+  isSupabaseConfigured: boolean;
+  isRealtimeActive: boolean;
+  isSyncing: boolean;
+  refreshFromSupabase: () => Promise<void>;
 }
 
 const LabContext = createContext<LabContextType | undefined>(undefined);
@@ -594,6 +606,150 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_qr_scan_logs`, JSON.stringify(qrScanLogs));
   }, [qrScanLogs]);
+
+  // 10. Supabase Cloud Database & Realtime Synchronization
+  const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  const refreshFromSupabase = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsSyncing(true);
+    try {
+      const [chemRes, bottleRes, txRes, userRes, auditRes] = await Promise.all([
+        chemicalService.fetchAll(),
+        bottleService.fetchAll(),
+        usageService.fetchUsageTransactions(),
+        authService.fetchProfiles(),
+        auditService.fetchAll(100),
+      ]);
+
+      if (chemRes.data && chemRes.data.length > 0) {
+        setChemicals(chemRes.data);
+      }
+      if (bottleRes.data && bottleRes.data.length > 0) {
+        setBottles(bottleRes.data);
+      }
+      if (txRes.data && txRes.data.length > 0) {
+        setTransactions(txRes.data);
+      }
+      if (userRes.data && userRes.data.length > 0) {
+        setUsers(userRes.data);
+      }
+      if (auditRes.data && auditRes.data.length > 0) {
+        setAuditLogs(auditRes.data);
+      }
+    } catch (err) {
+      console.warn('refreshFromSupabase error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      setIsRealtimeActive(false);
+      return;
+    }
+
+    refreshFromSupabase();
+
+    const channel = supabase
+      .channel('labchem-realtime-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bottles' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newBottle = rowToBottle(payload.new);
+            setBottles((prev) => {
+              const idx = prev.findIndex((b) => b.id === newBottle.id || b.bottleCode === newBottle.bottleCode);
+              if (idx >= 0) {
+                const copy = [...prev];
+                copy[idx] = newBottle;
+                return copy;
+              }
+              return [newBottle, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedBottle = rowToBottle(payload.new);
+            setBottles((prev) =>
+              prev.map((b) => (b.id === updatedBottle.id ? updatedBottle : b))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setBottles((prev) => prev.filter((b) => b.id !== oldId));
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chemicals' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newChem = rowToChemical(payload.new);
+            setChemicals((prev) => {
+              if (prev.some((c) => c.id === newChem.id)) return prev;
+              return [newChem, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedChem = rowToChemical(payload.new);
+            setChemicals((prev) =>
+              prev.map((c) => (c.id === updatedChem.id ? updatedChem : c))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setChemicals((prev) => prev.filter((c) => c.id !== oldId));
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'usage_transactions' },
+        (payload) => {
+          const newTx = rowToUsageTransaction(payload.new);
+          setTransactions((prev) => {
+            if (prev.some((t) => t.id === newTx.id)) return prev;
+            return [newTx, ...prev];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            const row = payload.new;
+            setUsers((prev) =>
+              prev.map((u) => {
+                if (u.id === row.id) {
+                  return {
+                    ...u,
+                    name: row.full_name || u.name,
+                    role: (row.role || u.role) as any,
+                    status: (row.status || u.status) as any,
+                    department: row.department || u.department,
+                    limits: row.limits || u.limits,
+                    permissions: row.permissions || u.permissions,
+                  };
+                }
+                return u;
+              })
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        setIsRealtimeActive(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const logQrScan = ({
     qrId,
@@ -1831,6 +1987,21 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         `${activeUser.name} đã dùng ${quantity} ${unit} từ chai ${targetBottle.bottleCode} (${chem.name}): ${targetBottle.currentVolume} → ${newBottleVolume} ${targetBottle.unit}. Tổng kho còn: ${newTotal} ${chem.primaryUnit}.`
       );
 
+      // Async sync to Supabase Realtime Database
+      if (isSupabaseConfigured()) {
+        usageService.recordUsage({
+          bottleId: targetBottle.id,
+          quantityUsed: neededInBottleUnit,
+          userId: activeUser.id,
+          userName: activeUser.name,
+          chemicalId: chem.id,
+          chemicalName: chem.name,
+          purpose,
+          projectName: project,
+          notes,
+        }).catch((err) => console.warn('Supabase usage recording error:', err));
+      }
+
       return {
         success: true,
         message: `Đã ghi nhận sử dụng ${quantity} ${unit} từ chai ${targetBottle.bottleCode}. Chai còn lại: ${newBottleVolume} ${targetBottle.unit}.`,
@@ -1929,6 +2100,21 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setTransactions((prev) => [subTx, ...prev]);
       deductionsSummary.push(`${subTx.quantity} ${unit} từ chai ${bottleRef.bottleCode} (còn ${newVolume} ${bottleRef.unit})`);
       remainingNeeded -= deductInReqUnit;
+
+      // Sync individual bottle deduction to Supabase
+      if (isSupabaseConfigured()) {
+        usageService.recordUsage({
+          bottleId: bottleRef.id,
+          quantityUsed: deductInBottleUnit,
+          userId: activeUser.id,
+          userName: activeUser.name,
+          chemicalId: chem.id,
+          chemicalName: chem.name,
+          purpose: purpose || 'Tự động trừ chai (FIFO)',
+          projectName: project,
+          notes: notes || `Trừ tự động từ chai ${bottleRef.bottleCode}`,
+        }).catch((err) => console.warn('Supabase FIFO usage recording error:', err));
+      }
     }
 
     const nextBottlesList = Array.from(updatedBottlesMap.values());
@@ -2077,6 +2263,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedBottlesList = [newBottle, ...updatedBottlesList];
       targetBottleId = newBottleId;
       targetBottleCode = autoCode;
+
+      if (isSupabaseConfigured()) {
+        bottleService.insert(newBottle).catch((err) => console.warn('Supabase bottle insert error:', err));
+      }
     }
 
     setBottles(updatedBottlesList);
@@ -2527,6 +2717,11 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setBottles((prev) => [initialBottle, ...prev]);
 
+    if (isSupabaseConfigured()) {
+      chemicalService.insert(newChem).catch((err) => console.warn('Supabase chemical insert error:', err));
+      bottleService.insert(initialBottle).catch((err) => console.warn('Supabase bottle insert error:', err));
+    }
+
     logAudit('Thêm hóa chất mới', 'CHEMICAL', newId, `${currentUser.name} đã thêm hóa chất: ${newChem.name}`);
     return { success: true, message: `Đã thêm hóa chất "${newChem.name}" thành công!`, chemical: newChem };
   };
@@ -2539,6 +2734,11 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!existing) return { success: false, message: 'Không tìm thấy hóa chất.' };
 
     setChemicals((prev) => prev.map((c) => (c.id === id ? { ...c, ...chemicalUpdate } : c)));
+
+    if (isSupabaseConfigured()) {
+      chemicalService.update(id, chemicalUpdate).catch((err) => console.warn('Supabase chemical update error:', err));
+    }
+
     logAudit('Cập nhật thông tin hóa chất', 'CHEMICAL', id, `${currentUser.name} đã sửa hóa chất ${existing.name}`);
     return { success: true, message: `Đã cập nhật hóa chất "${existing.name}".` };
   };
@@ -2616,6 +2816,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `${currentUser.name} đã chuyển ${chem.name} vào Kho lưu trữ (Archive). Tồn kho: ${totalStockInfo.total} ${totalStockInfo.unit}. Lý do: ${deleteReason}`
     );
 
+    if (isSupabaseConfigured()) {
+      chemicalService.softDelete(id, currentUser.id, currentUser.name, deleteReason).catch((err) => console.warn('Supabase chemical archive error:', err));
+    }
+
     return { success: true, message: `Đã chuyển hóa chất "${chem.name}" vào Kho lưu trữ / Thùng rác. Lịch sử giao dịch được bảo toàn.` };
   };
 
@@ -2644,6 +2848,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nowIso = new Date().toISOString();
     const restoreReason = reason || 'Khôi phục bởi Quản lý';
+
+    if (isSupabaseConfigured()) {
+      chemicalService.restore(id).catch((err) => console.warn('Supabase chemical restore error:', err));
+    }
 
     // Restore Chemical to ACTIVE
     setChemicals((prev) =>
@@ -3485,6 +3693,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearAllData,
         exportDatabaseJSON,
         importDatabaseJSON,
+
+        // Supabase Cloud Database & Realtime Sync
+        isSupabaseConfigured: isSupabaseConfigured(),
+        isRealtimeActive,
+        isSyncing,
+        refreshFromSupabase,
       }}
     >
       {children}
@@ -3499,3 +3713,5 @@ export const useLab = () => {
   }
   return context;
 };
+
+export const useLabContext = useLab;

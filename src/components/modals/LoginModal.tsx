@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useLab, DEFAULT_MANAGER_EMAIL } from '../../context/LabContext';
 import { User, UserRole } from '../../types';
+import { authService } from '../../services/authService';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import {
   X,
   LogIn,
@@ -15,6 +17,7 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 
 interface Props {
@@ -174,7 +177,38 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <div className="space-y-4">
               {/* Presets with verified Google OAuth profiles */}
               <div className="space-y-2">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                {/* Supabase Auth Live Google Sign-in */}
+                {isSupabaseConfigured() && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await authService.signInWithGoogle();
+                      } catch (err: any) {
+                        setErrorMessage(err.message || 'Lỗi khi gọi Google OAuth qua Supabase Auth');
+                      }
+                    }}
+                    className="w-full p-3 rounded-xl border border-cyan-400 bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white flex items-center justify-between transition-all shadow-md group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0">
+                        <GoogleIcon className="w-5 h-5" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-xs flex items-center gap-1.5">
+                          <span>Đăng Nhập Trực Tiếp Với Google OAuth</span>
+                          <span className="text-[9px] bg-white/20 text-white font-mono px-1.5 py-0.2 rounded font-bold">Supabase</span>
+                        </div>
+                        <div className="text-[10px] text-cyan-100 font-mono">Chuyển hướng đến Google Accounts · Tự động tạo Profile</div>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-white flex items-center gap-1 group-hover:translate-x-1 transition-transform shrink-0">
+                      Mở Google →
+                    </span>
+                  </button>
+                )}
+
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-1">
                   Chọn nhanh tài khoản thử nghiệm luồng Manager / User:
                 </div>
 

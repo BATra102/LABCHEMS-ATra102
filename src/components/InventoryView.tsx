@@ -226,11 +226,11 @@ export const InventoryView: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Quick QR Scanner & Record Usage (Prominent Actions) */}
+          {/* Quick QR Scanner & Record Usage */}
           {onOpenQrScanner && (
             <button
               onClick={onOpenQrScanner}
-              className="px-3.5 py-1.5 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-xl transition-all flex items-center gap-1.5 shadow-sm hover:shadow-cyan-500/20 cursor-pointer active:scale-95"
+              className="flex px-3.5 py-1.5 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-xl transition-all items-center gap-1.5 shadow-xs hover:shadow-cyan-500/20 cursor-pointer active:scale-95"
               title="Quét mã QR tem dán trên chai hóa chất bằng Camera"
             >
               <QrCode className="w-3.5 h-3.5 text-cyan-200" />
@@ -240,7 +240,7 @@ export const InventoryView: React.FC<Props> = ({
 
           <button
             onClick={() => onOpenRecordUsage()}
-            className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all flex items-center gap-1.5 shadow-sm hover:shadow-emerald-500/20 cursor-pointer active:scale-95"
+            className="flex px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all items-center gap-1.5 shadow-xs hover:shadow-emerald-500/20 cursor-pointer active:scale-95"
             title="Ghi nhận sử dụng và trừ tồn kho chai"
           >
             <Plus className="w-3.5 h-3.5" />

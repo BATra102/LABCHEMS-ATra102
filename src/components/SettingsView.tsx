@@ -34,12 +34,19 @@ import {
   Shield,
   Info,
   HelpCircle,
+  Zap,
+  RefreshCw,
+  Copy,
+  ExternalLink,
+  Settings,
 } from 'lucide-react';
+import { testSupabaseConnection } from '../lib/supabase';
 
-type SettingsTab = 'backup' | 'test' | 'audit' | 'reports' | 'users';
+type SettingsTab = 'supabase' | 'backup' | 'test' | 'audit' | 'reports' | 'users';
 
 interface Props {
   onOpenArchiveCenter?: () => void;
+  onOpenSupabaseConfig?: () => void;
 }
 
 interface TestCaseResult {
@@ -51,7 +58,7 @@ interface TestCaseResult {
   passed: boolean;
 }
 
-export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter }) => {
+export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter, onOpenSupabaseConfig }) => {
   const {
     chemicals,
     bottles,
@@ -74,10 +81,34 @@ export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter }) => {
     getChemicalTotalStock,
     getChemicalStockStatus,
     getChemicalExpiryStatus,
+    isSupabaseConfigured,
+    isRealtimeActive,
+    isSyncing,
+    refreshFromSupabase,
   } = useLab();
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>('backup');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('supabase');
   const [exportWarning, setExportWarning] = useState<string | null>(null);
+
+  // Supabase test state
+  const [supabaseTesting, setSupabaseTesting] = useState(false);
+  const [supabasePingResult, setSupabasePingResult] = useState<{
+    success: boolean;
+    message: string;
+    latencyMs?: number;
+  } | null>(null);
+  const [sqlCopied, setSqlCopied] = useState(false);
+
+  const handleTestSupabase = async () => {
+    setSupabaseTesting(true);
+    setSupabasePingResult(null);
+    try {
+      const res = await testSupabaseConnection();
+      setSupabasePingResult(res);
+    } finally {
+      setSupabaseTesting(false);
+    }
+  };
 
   // Test Suite state
   const [testResults, setTestResults] = useState<TestCaseResult[] | null>(null);
@@ -282,6 +313,19 @@ export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter }) => {
       {/* Settings Sub-Navigation Menu */}
       <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-lg w-fit text-xs">
         <button
+          onClick={() => setActiveTab('supabase')}
+          className={`px-3 py-1.5 font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+            activeTab === 'supabase' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Database className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Supabase Cloud & Realtime</span>
+          {isSupabaseConfigured && (
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('backup')}
           className={`px-3 py-1.5 font-medium rounded-md transition-colors flex items-center gap-1.5 ${
             activeTab === 'backup' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
@@ -331,6 +375,189 @@ export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter }) => {
           <span>Phân Quyền & Thành Viên</span>
         </button>
       </div>
+
+      {/* Sub-Tab: Supabase Cloud Database & Realtime */}
+      {activeTab === 'supabase' && (
+        <div className="space-y-5">
+          {/* Main Status & Quick Actions Banner */}
+          <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="flex items-start gap-3">
+                <div className={`p-3 rounded-xl border shrink-0 ${
+                  isSupabaseConfigured
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-amber-50 border-amber-200 text-amber-700'
+                }`}>
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-bold text-slate-900">
+                      Supabase Cloud Database & Realtime
+                    </h2>
+                    {isSupabaseConfigured ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>ĐÃ KẾT NỐI CLOUD</span>
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-100 text-amber-800">
+                        CHẾ ĐỘ NỘI BỘ (DEMO MODE)
+                      </span>
+                    )}
+                    {isRealtimeActive && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-teal-100 text-teal-800 flex items-center gap-1">
+                        <Zap className="w-3 h-3 text-teal-600" />
+                        <span>REALTIME ACTIVE</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Hệ thống lưu trữ đám mây PostgreSQL với cơ chế Row-Level Security (RLS), khóa hàng nguyên tử (Atomic locking) và truyền tải sự kiện thời gian thực (Supabase Realtime Broadcast).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {onOpenSupabaseConfig && (
+                  <button
+                    onClick={onOpenSupabaseConfig}
+                    className="px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Cấu hình Supabase</span>
+                  </button>
+                )}
+                <button
+                  onClick={refreshFromSupabase}
+                  disabled={isSyncing || !isSupabaseConfigured}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                  title="Tải lại toàn bộ dữ liệu mới nhất từ Supabase"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-cyan-600' : ''}`} />
+                  <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Ping & Latency Test */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-semibold text-slate-700">Kiểm tra kết nối & Độ trễ mạng (Ping):</span>
+                {supabasePingResult && (
+                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${
+                    supabasePingResult.success ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {supabasePingResult.message}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={handleTestSupabase}
+                disabled={supabaseTesting}
+                className="px-3 py-1.5 text-xs font-medium text-cyan-700 hover:text-cyan-800 bg-white border border-cyan-200 hover:border-cyan-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3 h-3 ${supabaseTesting ? 'animate-spin' : ''}`} />
+                <span>{supabaseTesting ? 'Đang ping...' : 'Kiểm tra ping'}</span>
+              </button>
+            </div>
+
+            {/* Realtime Architecture Explanation Card */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-linear-to-b from-white to-slate-50 space-y-1">
+                <div className="text-[11px] text-slate-500 font-medium">Bảng Hóa Chất (chemicals)</div>
+                <div className="text-xl font-extrabold text-slate-900 font-mono">{chemicals.length}</div>
+                <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  <span>Realtime Sync</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-linear-to-b from-white to-slate-50 space-y-1">
+                <div className="text-[11px] text-slate-500 font-medium">Từng Chai Riêng Biệt (bottles)</div>
+                <div className="text-xl font-extrabold text-slate-900 font-mono">{bottles.length}</div>
+                <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  <span>Trừ tự động FIFO</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-linear-to-b from-white to-slate-50 space-y-1">
+                <div className="text-[11px] text-slate-500 font-medium">Lịch Sử Dùng (usage_transactions)</div>
+                <div className="text-xl font-extrabold text-slate-900 font-mono">{transactions.length}</div>
+                <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  <span>Realtime Event</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-linear-to-b from-white to-slate-50 space-y-1">
+                <div className="text-[11px] text-slate-500 font-medium">Hồ Sơ & Phân Quyền (profiles)</div>
+                <div className="text-xl font-extrabold text-slate-900 font-mono">{users.length}</div>
+                <div className="text-[10px] text-purple-700 font-semibold flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>RLS & Permissions</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Setup Guide & SQL Migration Box */}
+          <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-4 text-xs text-slate-700">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-cyan-600" />
+              <span>Hướng Dẫn Kết Nối Dự Án Supabase Của Bạn (3 Bước Đơn Giản)</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="font-bold text-slate-900 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-cyan-700 text-white flex items-center justify-center text-[10px] font-bold">1</span>
+                  <span>Tạo Dự Án Supabase</span>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Truy cập <strong>supabase.com</strong>, tạo một Project mới miễn phí và sao chép <code>Project URL</code> cùng <code>anon key</code> từ phần Project Settings → API.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="font-bold text-slate-900 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-cyan-700 text-white flex items-center justify-center text-[10px] font-bold">2</span>
+                  <span>Chạy SQL Migration</span>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Vào <strong>SQL Editor</strong> trên Supabase Dashboard, dán toàn bộ nội dung file <code>supabase/migrations/20261003000000_init_labchem.sql</code> và nhấn <strong>Run</strong>.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sampleNote = `-- Tệp migration hoàn chỉnh nằm tại: supabase/migrations/20261003000000_init_labchem.sql
+-- Sao chép nội dung tệp này vào Supabase SQL Editor và nhấn Run!`;
+                    navigator.clipboard.writeText(sampleNote);
+                    setSqlCopied(true);
+                    setTimeout(() => setSqlCopied(false), 2500);
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-medium text-cyan-700 bg-cyan-50 hover:bg-cyan-100 rounded-lg border border-cyan-200 flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{sqlCopied ? 'Đã sao chép!' : 'Chép ghi chú SQL'}</span>
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="font-bold text-slate-900 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-cyan-700 text-white flex items-center justify-center text-[10px] font-bold">3</span>
+                  <span>Cấu Hình & Realtime</span>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Mở nút <strong>"Cấu hình Supabase"</strong> ở trên, nhập URL và Key. Dữ liệu sẽ lập tức được lưu vào Cloud và tự động cập nhật Realtime giữa các người dùng mà không cần F5!
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sub-Tab 1: Backup & Demo Data */}
       {activeTab === 'backup' && (

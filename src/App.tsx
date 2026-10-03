@@ -27,6 +27,7 @@ import { UserGuideModal } from './components/modals/UserGuideModal';
 import { QrScannerModal } from './components/modals/QrScannerModal';
 import { ArchiveCenterModal } from './components/modals/ArchiveCenterModal';
 import { DeleteChemicalModal } from './components/modals/DeleteChemicalModal';
+import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileMenuDrawer } from './components/modals/MobileMenuDrawer';
 import { Bottle, Chemical } from './types';
@@ -50,6 +51,7 @@ function MainApp() {
   const [discrepancyChemId, setDiscrepancyChemId] = useState<string | undefined>();
   const [discrepancyBottleId, setDiscrepancyBottleId] = useState<string | undefined>();
   const [userGuideOpen, setUserGuideOpen] = useState(false);
+  const [supabaseConfigOpen, setSupabaseConfigOpen] = useState(false);
 
   // QR Gateway & Archive Center states (Mục 1 & Mục 2)
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
@@ -66,7 +68,7 @@ function MainApp() {
   const [inventorySearchTerm, setInventorySearchTerm] = useState<string>('');
   const [targetChemicalId, setTargetChemicalId] = useState<string | undefined>();
 
-  const { bottles, isManager, currentUser } = useLab();
+  const { bottles, isManager, currentUser, refreshFromSupabase } = useLab();
 
   // Guard against non-managers accessing restricted tabs (Mục 1 & Mục 3)
   useEffect(() => {
@@ -143,6 +145,7 @@ function MainApp() {
         onOpenDiscrepancyModal={() => handleOpenDiscrepancy()}
         onOpenUserGuide={() => setUserGuideOpen(true)}
         onOpenQrScanner={() => setQrScannerOpen(true)}
+        onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
         onSelectChemicalFromSearch={handleSelectChemicalFromSearch}
         onSearchSubmit={handleSearchSubmit}
       />
@@ -211,7 +214,10 @@ function MainApp() {
         {activeTab === 'users' && isManager && <UserManagementView />}
 
         {activeTab === 'settings' && isManager && (
-          <SettingsView onOpenArchiveCenter={handleOpenArchiveCenter} />
+          <SettingsView
+            onOpenArchiveCenter={handleOpenArchiveCenter}
+            onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
+          />
         )}
       </main>
 
@@ -301,6 +307,14 @@ function MainApp() {
       <UserGuideModal
         isOpen={userGuideOpen}
         onClose={() => setUserGuideOpen(false)}
+      />
+
+      <SupabaseConfigModal
+        isOpen={supabaseConfigOpen}
+        onClose={() => setSupabaseConfigOpen(false)}
+        onConfigChanged={() => {
+          refreshFromSupabase();
+        }}
       />
 
       {/* Mobile Slide-over Drawer (Hamburger menu) */}
