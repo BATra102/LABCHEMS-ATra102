@@ -1,4 +1,4 @@
-export type UserRole = 'MANAGER' | 'USER' | 'ADMIN' | 'LAB_MANAGER' | 'MEMBER';
+export type UserRole = 'SENIOR_MANAGER' | 'MANAGER' | 'USER' | 'ADMIN' | 'LAB_MANAGER' | 'MEMBER' | 'STAFF' | 'VIEWER';
 export type UserStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'DELETED';
 
 export interface UserLimits {

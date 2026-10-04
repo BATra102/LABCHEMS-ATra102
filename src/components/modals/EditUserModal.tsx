@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLab } from '../../context/LabContext';
 import { User } from '../../types';
+import { isSeniorManagerEmail, isSeniorManagerUser } from '../../utils/roleUtils';
 import {
   X,
   User as UserIcon,
@@ -57,8 +58,12 @@ export const EditUserModal: React.FC<Props> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const isSenior = isSeniorManagerUser(currentUser);
   const activeManagers = users.filter(
-    (u) => (u.role === 'MANAGER' || u.role === 'ADMIN') && u.status === 'ACTIVE'
+    (u) =>
+      (u.role === 'MANAGER' || u.role === 'ADMIN') &&
+      u.status === 'ACTIVE' &&
+      (isSenior || !isSeniorManagerEmail(u.email))
   );
 
   useEffect(() => {

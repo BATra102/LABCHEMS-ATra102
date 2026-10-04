@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLab } from '../context/LabContext';
+import { getRoleDisplayName, isSeniorManagerUser } from '../utils/roleUtils';
 import {
   Plus,
   Settings,
@@ -621,10 +622,14 @@ export const Header: React.FC<Props> = ({
                   <div className="flex items-center gap-1 mt-0.5">
                     <span
                       className={`text-[9px] font-mono font-bold px-1 rounded ${
-                        isManager ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
+                        isSeniorManagerUser(currentUser)
+                          ? 'bg-indigo-100 text-indigo-700'
+                          : isManager
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'bg-slate-100 text-slate-600'
                       }`}
                     >
-                      {currentUser.role}
+                      {getRoleDisplayName(currentUser.role, currentUser.email)}
                     </span>
                     {currentUser.status === 'PENDING' && (
                       <span className="text-[9px] font-bold px-1 rounded bg-amber-100 text-amber-800">
@@ -653,10 +658,14 @@ export const Header: React.FC<Props> = ({
                         <div className="flex items-center gap-1.5 mt-1">
                           <span
                             className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
-                              isManager ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
+                              isSeniorManagerUser(currentUser)
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : isManager
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            {currentUser.role}
+                            {getRoleDisplayName(currentUser.role, currentUser.email)}
                           </span>
                           <span
                             className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${

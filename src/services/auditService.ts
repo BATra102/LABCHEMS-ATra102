@@ -1,12 +1,23 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { AuditLog } from '../types';
 
+export interface AuditLogInput {
+  action: string;
+  entityType: 'CHEMICAL' | 'BOTTLE' | 'USER' | 'TRANSACTION' | 'SETTINGS' | 'SYSTEM';
+  entityId?: string;
+  description: string;
+  actorId?: string;
+  actorName?: string;
+  oldData?: any;
+  newData?: any;
+}
+
 export const auditService = {
   async log(
-    action: string,
-    entityType: 'CHEMICAL' | 'BOTTLE' | 'USER' | 'TRANSACTION' | 'SETTINGS' | 'SYSTEM',
-    entityId: string,
-    description: string,
+    actionOrParams: string | AuditLogInput,
+    entityType?: 'CHEMICAL' | 'BOTTLE' | 'USER' | 'TRANSACTION' | 'SETTINGS' | 'SYSTEM',
+    entityId?: string,
+    description?: string,
     actorId?: string,
     actorName?: string,
     oldData?: any,
@@ -14,15 +25,38 @@ export const auditService = {
   ): Promise<void> {
     if (!isSupabaseConfigured()) return;
 
+    let pAction = '';
+    let pEntityType = 'SYSTEM';
+    let pEntityId: string | null = null;
+    let pDescription: string | null = null;
+    let pOldData: any = null;
+    let pNewData: any = null;
+
+    if (typeof actionOrParams === 'object' && actionOrParams !== null) {
+      pAction = actionOrParams.action;
+      pEntityType = actionOrParams.entityType;
+      pEntityId = actionOrParams.entityId || null;
+      pDescription = actionOrParams.description || null;
+      pOldData = actionOrParams.oldData || null;
+      pNewData = actionOrParams.newData || null;
+    } else {
+      pAction = actionOrParams;
+      pEntityType = entityType || 'SYSTEM';
+      pEntityId = entityId || null;
+      pDescription = description || null;
+      pOldData = oldData || null;
+      pNewData = newData || null;
+    }
+
     try {
       // Use secure RPC that verifies auth.uid() on the server
       const { error: rpcErr } = await supabase.rpc('record_audit_log', {
-        p_action: action,
-        p_entity_type: entityType,
-        p_entity_id: entityId || null,
-        p_description: description || null,
-        p_old_data: oldData ? oldData : null,
-        p_new_data: newData ? newData : null,
+        p_action: pAction,
+        p_entity_type: pEntityType,
+        p_entity_id: pEntityId,
+        p_description: pDescription,
+        p_old_data: pOldData,
+        p_new_data: pNewData,
       });
 
       if (rpcErr) {

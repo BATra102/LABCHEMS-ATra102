@@ -66,16 +66,48 @@ export const bottleService = {
 
     try {
       const trimmed = codeOrQr.trim();
-      const { data, error } = await supabase
+      const clean = trimmed.replace(/^(LABCHEM:BOTTLE:|LABCHEM:CHEMICAL:|BOTTLE:|CHEM:)/i, '').trim();
+
+      // 1. Exact match first
+      const { data: exactData, error: exactError } = await supabase
         .from('bottles')
         .select('*')
-        .or(`qr_code.eq.${trimmed},bottle_code.eq.${trimmed}`)
+        .or(`qr_code.ilike.${clean},bottle_code.ilike.${clean},qr_code.ilike.${trimmed},bottle_code.ilike.${trimmed}`)
         .limit(1)
         .maybeSingle();
 
-      if (error) throw error;
-      if (!data) return { data: null, error: null };
-      return { data: rowToBottle(data), error: null };
+      if (exactData) {
+        return { data: rowToBottle(exactData), error: null };
+      }
+
+      // 2. Try prefix variants (LAB-XXX or without LAB-)
+      const strippedLab = clean.startsWith('LAB-') ? clean.replace(/^LAB-/i, '') : clean;
+      const prefixedLab = `LAB-${clean}`;
+
+      const { data: variantData, error: variantError } = await supabase
+        .from('bottles')
+        .select('*')
+        .or(`bottle_code.ilike.${strippedLab},qr_code.ilike.${strippedLab},bottle_code.ilike.${prefixedLab},qr_code.ilike.${prefixedLab}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (variantData) {
+        return { data: rowToBottle(variantData), error: null };
+      }
+
+      // If uuid match
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+        const { data: uuidData } = await supabase
+          .from('bottles')
+          .select('*')
+          .eq('id', clean)
+          .maybeSingle();
+        if (uuidData) {
+          return { data: rowToBottle(uuidData), error: null };
+        }
+      }
+
+      return { data: null, error: exactError || variantError || null };
     } catch (error: any) {
       console.error('bottleService.findByQrOrCode error:', error);
       return { data: null, error };

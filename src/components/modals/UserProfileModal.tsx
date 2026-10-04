@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useLab } from '../../context/LabContext';
+import { getRoleDisplayName } from '../../utils/roleUtils';
 import {
   X,
   User as UserIcon,
@@ -106,7 +107,7 @@ export const UserProfileModal: React.FC<Props> = ({ isOpen, onClose, onOpenLogin
                     isManager ? 'bg-purple-500/30 text-purple-200 border border-purple-400/30' : 'bg-cyan-500/30 text-cyan-200 border border-cyan-400/30'
                   }`}
                 >
-                  {isManager ? 'Quản lý (Manager)' : 'Thành viên (User)'}
+                  {getRoleDisplayName(currentUser.role, currentUser.email)}
                 </span>
               </div>
               <div className="text-xs text-slate-300 font-mono flex items-center gap-1.5 mt-1 truncate">

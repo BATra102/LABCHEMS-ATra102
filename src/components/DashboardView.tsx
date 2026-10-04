@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLab } from '../context/LabContext';
 import { getStockStatusLabel, getExpiryStatusLabel } from '../utils/status';
+import { getRoleDisplayName } from '../utils/roleUtils';
 import {
   AlertTriangle,
   AlertOctagon,
@@ -156,7 +157,7 @@ export const DashboardView: React.FC<Props> = ({
                 isManager ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'
               }`}
             >
-              {currentUser.role}
+              {getRoleDisplayName(currentUser.role, currentUser.email)}
             </span>
             {pendingApprovals.length > 0 && isManager && (
               <button

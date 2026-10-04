@@ -83,6 +83,27 @@ export const chemicalService = {
     }
   },
 
+  async fetchById(id: string): Promise<{ data: Chemical | null; error: any }> {
+    if (!isSupabaseConfigured()) {
+      return { data: null, error: new Error('Supabase chưa cấu hình') };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('chemicals')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return { data: null, error: null };
+      return { data: rowToChemical(data), error: null };
+    } catch (error: any) {
+      console.error('chemicalService.fetchById error:', error);
+      return { data: null, error };
+    }
+  },
+
   async insert(chemical: Omit<Chemical, 'id'>): Promise<{ data: Chemical | null; error: any }> {
     if (!isSupabaseConfigured()) {
       return { data: null, error: new Error('Supabase chưa cấu hình') };

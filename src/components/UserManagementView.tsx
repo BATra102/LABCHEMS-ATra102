@@ -29,6 +29,7 @@ import {
 import { UserLimitsModal } from './modals/UserLimitsModal';
 import { DeleteManagerModal } from './modals/DeleteManagerModal';
 import { EditUserModal, PRESET_DEPARTMENTS } from './modals/EditUserModal';
+import { getRoleDisplayName, isSeniorManagerUser, isSeniorManagerEmail } from '../utils/roleUtils';
 
 export const UserManagementView: React.FC = () => {
   const {
@@ -88,10 +89,10 @@ export const UserManagementView: React.FC = () => {
         </div>
         <h2 className="text-lg font-bold text-slate-900">TRUY CẬP BỊ TỪ CHỐI (ACCESS DENIED)</h2>
         <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-          Trang <strong>Quản Lý Người Dùng & Phân Quyền (User Management)</strong> chỉ dành riêng cho tài khoản có vai trò <strong>MANAGER</strong>.
+          Trang <strong>Quản Lý Người Dùng & Phân Quyền (User Management)</strong> chỉ dành riêng cho tài khoản có vai trò <strong>Người quản lý</strong>.
         </p>
         <p className="text-xs text-slate-500 mt-1">
-          Tài khoản hiện tại của bạn: <strong>{currentUser.name}</strong> ({currentUser.role}). Bạn không có thẩm quyền truy cập trang này.
+          Tài khoản hiện tại của bạn: <strong>{currentUser.name}</strong> ({getRoleDisplayName(currentUser.role, currentUser.email)}). Bạn không có thẩm quyền truy cập trang này.
         </p>
       </div>
     );
@@ -162,7 +163,7 @@ export const UserManagementView: React.FC = () => {
             <div>
               <h1 className="text-lg font-bold text-slate-900 tracking-tight">Quản Lý Người Dùng & Phân Quyền</h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                Duyệt thành viên Google OAuth, cấp quyền vai trò (MANAGER / USER), kích hoạt hoặc khóa tài khoản
+                Duyệt thành viên Google OAuth, cấp quyền vai trò (Người quản lý / Nhân viên / Người xem), kích hoạt hoặc khóa tài khoản
               </p>
             </div>
           </div>
@@ -293,8 +294,10 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => setNewRole(e.target.value as UserRole)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium"
               >
-                <option value="USER">USER (Thành viên - Chỉ ghi sử dụng)</option>
-                <option value="MANAGER">MANAGER (Quản lý - Toàn quyền quản trị)</option>
+                <option value="USER">Thành viên (USER - Ghi xuất dùng)</option>
+                <option value="STAFF">Nhân viên (STAFF - Nhập kho, xuất dùng, kiểm tra)</option>
+                <option value="VIEWER">Người xem (VIEWER - Chỉ xem, không chỉnh sửa)</option>
+                <option value="MANAGER">Người quản lý (MANAGER - Toàn quyền quản trị)</option>
               </select>
             </div>
             <div>
@@ -434,9 +437,11 @@ export const UserManagementView: React.FC = () => {
                 onChange={(e) => setRoleFilter(e.target.value as any)}
                 className="px-2 py-1 text-xs border border-slate-200 rounded-lg bg-white"
               >
-                <option value="ALL">Tất cả role</option>
-                <option value="MANAGER">MANAGER</option>
-                <option value="USER">USER</option>
+                <option value="ALL">Tất cả vai trò</option>
+                <option value="MANAGER">Người quản lý</option>
+                <option value="STAFF">Nhân viên</option>
+                <option value="VIEWER">Người xem</option>
+                <option value="USER">Thành viên</option>
               </select>
             </div>
 
@@ -581,13 +586,15 @@ export const UserManagementView: React.FC = () => {
                 ) : (
                   filteredUsers.map((u) => {
                     const isCurrent = u.id === currentUser.id;
-                    const isTargetManager = u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER';
+                    const isTargetSenior = isSeniorManagerUser(u);
+                    const isTargetManager = isTargetSenior || u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER';
                     const perm = canManageTargetUser(u);
-                    const canEditUser = currentUser.role === 'ADMIN' || isCurrent || (!isTargetManager && perm.allowed);
-                    const canManageLimits = !isTargetManager && perm.allowed;
-                    const canLockUser = currentUser.role === 'ADMIN' || (!isTargetManager && perm.allowed);
+                    const canEditUser = !isTargetSenior && (currentUser.role === 'ADMIN' || isCurrent || (!isTargetManager && perm.allowed));
+                    const canManageLimits = !isTargetSenior && !isTargetManager && perm.allowed;
+                    const canLockUser = !isTargetSenior && (currentUser.role === 'ADMIN' || (!isTargetManager && perm.allowed));
                     const canDeleteUser =
                       !isCurrent &&
+                      !isTargetSenior &&
                       u.role !== 'ADMIN' &&
                       (isTargetManager ? u.status === 'DEACTIVATED' : perm.allowed);
 
@@ -637,12 +644,18 @@ export const UserManagementView: React.FC = () => {
                         <td className="py-3 px-4 whitespace-nowrap">
                           <span
                             className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold border ${
-                              u.role === 'MANAGER' || u.role === 'ADMIN'
+                              u.role === 'SENIOR_MANAGER'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : u.role === 'MANAGER' || u.role === 'ADMIN'
                                 ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : u.role === 'STAFF'
+                                ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                                : u.role === 'VIEWER'
+                                ? 'bg-slate-50 text-slate-600 border-slate-200'
                                 : 'bg-slate-50 text-slate-700 border-slate-200'
                             }`}
                           >
-                            {u.role}
+                            {getRoleDisplayName(u.role, u.email)}
                           </span>
                         </td>
 

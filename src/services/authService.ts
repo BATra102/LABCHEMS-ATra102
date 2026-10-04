@@ -1,47 +1,57 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, UserRole, UserStatus } from '../types';
+import { isSeniorManagerEmail } from '../utils/roleUtils';
 
-export const rowToUser = (row: any): User => ({
-  id: row.id,
-  name: row.full_name || 'Người dùng Lab',
-  email: row.google_email || '',
-  role: (row.role || 'USER') as UserRole,
-  status: (row.status || 'ACTIVE') as UserStatus,
-  department: row.department || 'Bộ môn Dược liệu & Chiết xuất',
-  picture: row.avatar_url || undefined,
-  position: row.job_title || undefined,
-  phone: row.phone || undefined,
-  member_code: row.member_code || undefined,
-  notes: row.notes || undefined,
-  manager_id: row.manager_id || undefined,
-  manager_name: row.manager_name || undefined,
-  limits: row.limits || {
-    maxUsagePerTransaction: row.role === 'MANAGER' || row.role === 'ADMIN' ? null : 100,
-    dailyUsageLimit: row.role === 'MANAGER' || row.role === 'ADMIN' ? null : 500,
-    dailyTransactionCount: row.role === 'MANAGER' || row.role === 'ADMIN' ? null : 10,
-    maxStockInQuantity: row.role === 'MANAGER' || row.role === 'ADMIN' ? null : 5,
-  },
-  permissions: row.permissions || {
-    viewInventory: true,
-    addChemical: row.role === 'MANAGER' || row.role === 'ADMIN',
-    editChemical: row.role === 'MANAGER' || row.role === 'ADMIN',
-    archiveChemical: row.role === 'MANAGER' || row.role === 'ADMIN',
-    deleteChemical: row.role === 'MANAGER' || row.role === 'ADMIN',
-    recordUsage: true,
-    viewAllUsageHistory: row.role === 'MANAGER' || row.role === 'ADMIN',
-    createStockIn: row.role === 'MANAGER' || row.role === 'ADMIN',
-    adjustStock: row.role === 'MANAGER' || row.role === 'ADMIN',
-    importExcel: row.role === 'MANAGER' || row.role === 'ADMIN',
-    viewReports: true,
-    manageUsers: row.role === 'MANAGER' || row.role === 'ADMIN',
-  },
-  dateJoined: row.created_at ? row.created_at.split('T')[0] : undefined,
-  lastLogin: row.last_login_at || undefined,
-  deleted_at: row.deleted_at || undefined,
-  deleted_by: row.deleted_by || undefined,
-  deleted_by_name: row.deleted_by_name || undefined,
-  deletion_reason: row.deletion_reason || undefined,
-});
+export const rowToUser = (row: any): User => {
+  const isSenior = row.is_senior_manager || isSeniorManagerEmail(row.google_email);
+  const role: UserRole = isSenior ? 'SENIOR_MANAGER' : ((row.role || 'USER') as UserRole);
+  const isManagerLike = role === 'SENIOR_MANAGER' || role === 'MANAGER' || role === 'ADMIN' || role === 'LAB_MANAGER';
+  const isStaff = role === 'STAFF';
+  const isViewer = role === 'VIEWER';
+
+  return {
+    id: row.id,
+    name: row.full_name || (isSenior ? 'Người quản lý cao cấp' : 'Người dùng Lab'),
+    email: row.google_email || '',
+    role,
+    status: (row.status || 'ACTIVE') as UserStatus,
+    department: row.department || 'Bộ môn Dược liệu & Chiết xuất',
+    picture: row.avatar_url || undefined,
+    position: row.job_title || undefined,
+    phone: row.phone || undefined,
+    member_code: row.member_code || undefined,
+    notes: row.notes || undefined,
+    manager_id: row.manager_id || undefined,
+    manager_name: row.manager_name || undefined,
+    limits: row.limits || {
+      maxUsagePerTransaction: isManagerLike ? null : 100,
+      dailyUsageLimit: isManagerLike ? null : 500,
+      dailyTransactionCount: isManagerLike ? null : 10,
+      maxStockInQuantity: isManagerLike ? null : isStaff ? 20 : 5,
+    },
+    permissions: row.permissions || {
+      viewInventory: true,
+      addChemical: isManagerLike,
+      editChemical: isManagerLike,
+      archiveChemical: isManagerLike,
+      deleteChemical: isManagerLike,
+      restoreChemical: isManagerLike,
+      recordUsage: !isViewer,
+      viewAllUsageHistory: isManagerLike || isStaff,
+      createStockIn: isManagerLike || isStaff,
+      adjustStock: isManagerLike,
+      importExcel: isManagerLike,
+      viewReports: isManagerLike || isStaff,
+      manageUsers: isManagerLike,
+    },
+    dateJoined: row.created_at ? row.created_at.split('T')[0] : undefined,
+    lastLogin: row.last_login_at || undefined,
+    deleted_at: row.deleted_at || undefined,
+    deleted_by: row.deleted_by || undefined,
+    deleted_by_name: row.deleted_by_name || undefined,
+    deletion_reason: row.deletion_reason || undefined,
+  };
+};
 
 export const authService = {
   async signInWithGoogle() {
@@ -156,9 +166,10 @@ export const authService = {
       }
 
       // Fallback: If trigger was not installed yet
-      const isDefaultManager = email.toLowerCase().includes('jasminebee279') || email.toLowerCase().includes('buianhtra');
-      const newRole: UserRole = isDefaultManager ? 'MANAGER' : 'USER';
-      const newStatus: UserStatus = isDefaultManager ? 'ACTIVE' : 'PENDING';
+      const isSenior = isSeniorManagerEmail(email);
+      const isDefaultManager = isSenior || email.toLowerCase().includes('jasminebee279') || email.toLowerCase().includes('buianhtra') || email.toLowerCase().includes('buiantra');
+      const newRole: UserRole = isSenior ? 'SENIOR_MANAGER' : isDefaultManager ? 'MANAGER' : 'USER';
+      const newStatus: UserStatus = (isSenior || isDefaultManager) ? 'ACTIVE' : 'PENDING';
 
       const payload = {
         id: authUser.id,

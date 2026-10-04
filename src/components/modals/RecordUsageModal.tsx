@@ -502,7 +502,7 @@ export const RecordUsageModal: React.FC<Props> = ({
 
     if (hasBlocker) {
       if (isInsufficientStock) {
-        setErrorMsg(`Không đủ tồn kho. Chai ${activeBottle?.bottleCode} chỉ còn ${currentBottleVol} ${bottleUnit}.`);
+        setErrorMsg('Không đủ hóa chất để thực hiện thao tác.');
       } else if (isBottleExpired) {
         setErrorMsg('Hóa chất đã hết hạn – không được phép sử dụng.');
       } else if (isBottleArchived || isBottleDisposed) {

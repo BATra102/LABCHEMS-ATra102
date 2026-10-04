@@ -1,4 +1,8 @@
-// Full SQL Migration text exported for instant clipboard copying in SupabaseConfigModal
+/**
+ * PRODUCTION MIGRATION SCRIPT FOR SUPABASE POSTGRESQL
+ * Generated from /supabase/migrations/20261003000000_init_labchem.sql
+ */
+
 export const LABCHEM_MIGRATION_SQL = `-- ====================================================================
 -- LABCHEM INVENTORY - SUPABASE COMPLETE PRODUCTION MIGRATION
 -- Production-Ready Schema with Strict RLS, Atomic RPC, Audit & Realtime
@@ -24,8 +28,9 @@ CREATE TABLE IF NOT EXISTS public.system_roles_whitelist (
 
 -- Pre-seed designated manager emails (Edit or add emails as needed)
 INSERT INTO public.system_roles_whitelist (email, role, notes) VALUES
-  ('jasminebee279@gmail.com', 'MANAGER', 'Chủ nhiệm / Quản lý Lab chính'),
-  ('buianhtra2021@gmail.com', 'MANAGER', 'Quản lý Lab Dược liệu & Chiết xuất')
+  ('jasminebee279@gmail.com', 'MANAGER', 'Người quản lý Lab chính'),
+  ('buianhtra2021@gmail.com', 'SENIOR_MANAGER', 'Người quản lý cao cấp toàn hệ thống LabChem'),
+  ('buiantra2021@gmail.com', 'SENIOR_MANAGER', 'Người quản lý cao cấp toàn hệ thống LabChem')
 ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
 
 -- ====================================================================
@@ -142,6 +147,7 @@ CREATE TABLE IF NOT EXISTS public.bottles (
   chemical_id UUID NOT NULL REFERENCES public.chemicals(id) ON DELETE CASCADE,
   bottle_code TEXT NOT NULL UNIQUE,
   qr_code TEXT NOT NULL UNIQUE,
+  barcode TEXT,
   lot_number TEXT,
   original_quantity NUMERIC NOT NULL CHECK (original_quantity >= 0),
   current_quantity NUMERIC NOT NULL CHECK (current_quantity >= 0),
@@ -164,6 +170,7 @@ CREATE TABLE IF NOT EXISTS public.bottles (
 CREATE INDEX IF NOT EXISTS idx_bottles_chemical_id ON public.bottles (chemical_id);
 CREATE INDEX IF NOT EXISTS idx_bottles_code ON public.bottles (bottle_code);
 CREATE INDEX IF NOT EXISTS idx_bottles_qr ON public.bottles (qr_code);
+CREATE INDEX IF NOT EXISTS idx_bottles_barcode ON public.bottles (barcode);
 CREATE INDEX IF NOT EXISTS idx_bottles_expiry ON public.bottles (expiry_date);
 CREATE INDEX IF NOT EXISTS idx_bottles_status ON public.bottles (status);
 
@@ -280,10 +287,19 @@ STABLE
 SECURITY DEFINER
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() 
-      AND role IN ('MANAGER', 'ADMIN', 'LAB_MANAGER') 
-      AND status = 'ACTIVE'
+    SELECT 1 
+    FROM public.profiles p
+    WHERE p.id = auth.uid() 
+      AND p.role IN ('MANAGER', 'ADMIN', 'LAB_MANAGER') 
+      AND p.status = 'ACTIVE'
+      AND (
+        NOT EXISTS (SELECT 1 FROM public.system_roles_whitelist)
+        OR EXISTS (
+          SELECT 1 FROM public.system_roles_whitelist w
+          WHERE (LOWER(w.email) = LOWER(p.email) OR LOWER(w.email) = LOWER(COALESCE(p.google_email, '')))
+            AND w.role IN ('MANAGER', 'ADMIN', 'LAB_MANAGER')
+        )
+      )
   );
 $$;
 
@@ -629,6 +645,163 @@ BEGIN
   );
 
   RETURN v_result;
+END;
+$$;
+
+-- ====================================================================
+-- SECTION 13B: ATOMIC FUNCTION adjust_bottle_stock() (CHỈ MANAGER ĐƯỢC PHÉP)
+-- Quy tắc:
+-- 1. auth.uid() BẮT BUỘC tồn tại
+-- 2. Caller BẮT BUỘC là Quản lý ACTIVE (public.is_manager())
+-- 3. Row locking FOR UPDATE chống race-condition
+-- 4. Chống âm kho: p_physical_quantity >= 0
+-- 5. Tự động ghi stock_transactions (loại ADJUSTMENT) & audit_logs
+-- 6. Trigger Realtime gửi thay đổi tới tất cả client
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.adjust_bottle_stock(
+  p_bottle_id UUID,
+  p_physical_quantity NUMERIC,
+  p_reason TEXT,
+  p_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_caller_id UUID;
+  v_bottle RECORD;
+  v_chemical RECORD;
+  v_user RECORD;
+  v_diff NUMERIC;
+  v_new_status TEXT;
+  v_tx_id UUID;
+BEGIN
+  -- 1. BẮT BUỘC AUTHENTICATED
+  v_caller_id := auth.uid();
+  IF v_caller_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required: Yêu cầu đăng nhập tài khoản Quản lý (auth.uid is null)';
+  END IF;
+
+  -- 2. BẮT BUỘC LÀ MANAGER ACTIVE
+  IF NOT public.is_manager() THEN
+    RAISE EXCEPTION 'ACCESS DENIED: Chỉ Quản lý (Manager/Admin/Lab Manager) có trạng thái ACTIVE mới có quyền điều chỉnh tồn kho thực tế';
+  END IF;
+
+  -- 3. Kiểm tra số lượng hợp lệ (không âm)
+  IF p_physical_quantity IS NULL OR p_physical_quantity < 0 THEN
+    RAISE EXCEPTION 'Số lượng tồn kho thực tế phải lớn hơn hoặc bằng 0';
+  END IF;
+
+  -- 4. Khóa dòng chai (FOR UPDATE) chống race-condition
+  SELECT * INTO v_bottle
+  FROM public.bottles
+  WHERE id = p_bottle_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Không tìm thấy chai hóa chất (ID: %)', p_bottle_id;
+  END IF;
+
+  SELECT * INTO v_chemical FROM public.chemicals WHERE id = v_bottle.chemical_id;
+  SELECT * INTO v_user FROM public.profiles WHERE id = v_caller_id;
+
+  v_diff := p_physical_quantity - v_bottle.current_quantity;
+
+  IF p_physical_quantity = 0 THEN
+    v_new_status := 'EMPTY';
+  ELSIF v_bottle.status = 'SEALED' AND p_physical_quantity < v_bottle.original_quantity THEN
+    v_new_status := 'IN_USE';
+  ELSE
+    v_new_status := v_bottle.status;
+  END IF;
+
+  -- 5. Cập nhật số lượng chai
+  UPDATE public.bottles
+  SET
+    current_quantity = p_physical_quantity,
+    status = v_new_status,
+    updated_at = now()
+  WHERE id = p_bottle_id;
+
+  -- 6. Ghi nhận giao dịch biến động kho (stock_transactions)
+  INSERT INTO public.stock_transactions (
+    chemical_id,
+    chemical_name,
+    bottle_id,
+    bottle_code,
+    user_id,
+    user_name,
+    transaction_type,
+    quantity,
+    unit,
+    quantity_before,
+    quantity_after,
+    notes,
+    created_at
+  ) VALUES (
+    v_chemical.id,
+    v_chemical.name,
+    v_bottle.id,
+    v_bottle.bottle_code,
+    v_caller_id,
+    COALESCE(v_user.full_name, 'Quản lý'),
+    'ADJUSTMENT',
+    ABS(v_diff),
+    v_bottle.unit,
+    v_bottle.current_quantity,
+    p_physical_quantity,
+    format('[Điều chỉnh tồn kho thực tế] %s. %s', p_reason, COALESCE(p_notes, '')),
+    now()
+  ) RETURNING id INTO v_tx_id;
+
+  -- 7. Ghi nhận nhật ký kiểm toán (audit_logs)
+  INSERT INTO public.audit_logs (
+    user_id,
+    actor_user_id,
+    actor_name,
+    action,
+    entity_type,
+    entity_id,
+    description,
+    old_data,
+    new_data,
+    created_at
+  ) VALUES (
+    v_caller_id,
+    v_caller_id,
+    COALESCE(v_user.full_name, 'Quản lý'),
+    'STOCK_ADJUSTMENT',
+    'BOTTLE',
+    v_bottle.id::text,
+    format('Quản lý %s điều chỉnh tồn kho chai %s (%s): %s → %s %s (%s%s). Lý do: %s',
+      COALESCE(v_user.full_name, 'Quản lý'),
+      v_bottle.bottle_code,
+      v_chemical.name,
+      v_bottle.current_quantity,
+      p_physical_quantity,
+      v_bottle.unit,
+      CASE WHEN v_diff >= 0 THEN '+' ELSE '' END,
+      v_diff,
+      p_reason
+    ),
+    jsonb_build_object('current_quantity', v_bottle.current_quantity, 'status', v_bottle.status),
+    jsonb_build_object('current_quantity', p_physical_quantity, 'status', v_new_status),
+    now()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'bottle_id', v_bottle.id,
+    'bottle_code', v_bottle.bottle_code,
+    'chemical_id', v_chemical.id,
+    'chemical_name', v_chemical.name,
+    'previous_quantity', v_bottle.current_quantity,
+    'new_quantity', p_physical_quantity,
+    'difference', v_diff,
+    'unit', v_bottle.unit,
+    'new_status', v_new_status
+  );
 END;
 $$;
 
@@ -1064,7 +1237,7 @@ BEGIN
 END $$;
 
 -- ====================================================================
--- SECTION 19: SEED / DEMO DATA (OPTIONAL - CAN BE EXCLUDED IN EMPTY PRODUCTION)
+-- SECTION 19: DEFAULT DEPARTMENTS (CLEAN PRODUCTION)
 -- ====================================================================
 INSERT INTO public.departments (id, name, description) VALUES
   ('d1111111-1111-1111-1111-111111111111', 'Bộ môn Dược liệu & Chiết xuất', 'Phòng thí nghiệm nghiên cứu hoạt chất tự nhiên, chiết xuất và phân lập hợp chất'),
@@ -1072,22 +1245,4 @@ INSERT INTO public.departments (id, name, description) VALUES
   ('d3333333-3333-3333-3333-333333333333', 'Bộ môn Hóa dược', 'Nghiên cứu tổng hợp dẫn xuất và kiểm nghiệm bán thành phẩm dược phẩm')
 ON CONFLICT (name) DO NOTHING;
 
-INSERT INTO public.chemicals (id, name, cas_number, category, concentration, purity, manufacturer, catalog_number, unit, minimum_stock, warning_stock, hazard_classification, hazard_class, ghs_symbols, storage_location, description, notes, status) VALUES
-  ('c1111111-1111-1111-1111-111111111111', 'n-Hexane', '110-54-3', 'Solvents', '≥ 99%', 'HPLC Grade', 'Merck KGaA', '1.04374.2500', 'mL', 500, 1000, 'Chất lỏng dễ cháy (Flammable Liquid)', 'Chất lỏng dễ cháy', ARRAY['GHS02', 'GHS07', 'GHS08', 'GHS09'], 'Tủ dung môi hữu cơ A1 - Kệ 2', 'Dung môi không phân cực dùng trong sắc ký cột và chiết xuất.', 'Dung môi sắc ký', 'ACTIVE'),
-  ('c2222222-2222-2222-2222-222222222222', 'Methanol', '67-56-1', 'Solvents', '≥ 99.8%', 'HPLC Grade', 'Sigma-Aldrich', '34860-2.5L-R', 'mL', 1000, 2000, 'Chất lỏng dễ cháy, Độc tính cấp', 'Chất lỏng dễ cháy, Độc', ARRAY['GHS02', 'GHS06', 'GHS08'], 'Tủ dung môi hữu cơ A1 - Kệ 1', 'Dung môi phân cực cho HPLC và chiết cao dược liệu.', 'Dung môi HPLC', 'ACTIVE'),
-  ('c3333333-3333-3333-3333-333333333333', 'Ethanol tuyệt đối 99.7%', '64-17-5', 'Solvents', '99.7%', 'AR Grade', 'Xilong Scientific', '10098328', 'mL', 800, 1500, 'Chất lỏng dễ cháy', 'Chất lỏng dễ cháy', ARRAY['GHS02', 'GHS07'], 'Tủ dung môi hữu cơ A2 - Kệ 1', 'Dung môi trích ly dược liệu.', 'Dung môi chiết', 'ACTIVE'),
-  ('c4444444-4444-4444-4444-444444444444', 'Ethyl Acetate', '141-78-6', 'Solvents', '≥ 99.5%', 'Analytical Grade', 'Fisher Chemical', 'E/0255/17', 'mL', 600, 1200, 'Chất lỏng dễ cháy', 'Chất lỏng dễ cháy', ARRAY['GHS02', 'GHS07'], 'Tủ dung môi hữu cơ A2 - Kệ 2', 'Dung môi độ phân cực trung bình cho chiết lỏng-lỏng.', 'Dung môi chiết', 'ACTIVE'),
-  ('c5555555-5555-5555-5555-555555555555', 'Dichloromethane (DCM)', '75-09-2', 'Solvents', '≥ 99.8%', 'Analytical Grade', 'Merck KGaA', '1.06050.2500', 'mL', 500, 1000, 'Chất nghi ngờ gây ung thư', 'Chất độc hại', ARRAY['GHS08'], 'Tủ dung môi halogen A3 - Kệ 1', 'Dung môi trích ly alkaloid.', 'Dung môi halogen', 'ACTIVE'),
-  ('c6666666-6666-6666-6666-666666666666', 'Acetonitrile', '75-05-8', 'Solvents', '≥ 99.9%', 'LC-MS Grade', 'Honeywell Burdick & Jackson', 'LC015-2.5', 'mL', 1000, 1500, 'Chất lỏng dễ cháy, Độc tính cấp', 'Chất lỏng dễ cháy', ARRAY['GHS02', 'GHS07'], 'Tủ dung môi HPLC B1 - Kệ 1', 'Dung môi pha động cho HPLC.', 'Dung môi HPLC', 'ACTIVE')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.bottles (id, chemical_id, bottle_code, qr_code, lot_number, original_quantity, current_quantity, unit, opened_date, expiry_date, storage_location, status) VALUES
-  ('b1111111-1111-1111-1111-111111111111', 'c1111111-1111-1111-1111-111111111111', 'HEX-001', 'HEX-001', 'LOT-MRK-2024A', 500, 420, 'mL', '2026-08-15', '2028-12-31', 'Tủ dung môi hữu cơ A1 - Kệ 2', 'IN_USE'),
-  ('b1111111-1111-1111-1111-111111111112', 'c1111111-1111-1111-1111-111111111111', 'HEX-002', 'HEX-002', 'LOT-MRK-2024B', 500, 500, 'mL', NULL, '2029-06-30', 'Tủ dung môi hữu cơ A1 - Kệ 2', 'SEALED'),
-  ('b2222222-2222-2222-2222-222222222221', 'c2222222-2222-2222-2222-222222222222', 'MEOH-001', 'MEOH-001', 'LOT-SIG-8812', 1000, 850, 'mL', '2026-09-01', '2028-10-15', 'Tủ dung môi hữu cơ A1 - Kệ 1', 'IN_USE'),
-  ('b2222222-2222-2222-2222-222222222222', 'c2222222-2222-2222-2222-222222222222', 'MEOH-002', 'MEOH-002', 'LOT-SIG-8813', 1000, 1000, 'mL', NULL, '2029-01-20', 'Tủ dung môi hữu cơ A1 - Kệ 1', 'SEALED'),
-  ('b3333333-3333-3333-3333-333333333331', 'c3333333-3333-3333-3333-333333333333', 'ETOH-001', 'ETOH-001', 'LOT-XIL-9011', 1000, 750, 'mL', '2026-09-10', '2027-05-15', 'Tủ dung môi hữu cơ A2 - Kệ 1', 'IN_USE'),
-  ('b4444444-4444-4444-4444-444444444441', 'c4444444-4444-4444-4444-444444444444', 'EA-001', 'EA-001', 'LOT-FSH-4421', 1000, 900, 'mL', '2026-08-20', '2028-08-20', 'Tủ dung môi hữu cơ A2 - Kệ 2', 'IN_USE'),
-  ('b6666666-6666-6666-6666-666666666661', 'c6666666-6666-6666-6666-666666666666', 'ACN-001', 'ACN-001', 'LOT-HNW-1102', 1000, 600, 'mL', '2026-09-05', '2027-11-30', 'Tủ dung môi HPLC B1 - Kệ 1', 'IN_USE')
-ON CONFLICT (bottle_code) DO NOTHING;
 `;

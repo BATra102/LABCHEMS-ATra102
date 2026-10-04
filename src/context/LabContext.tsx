@@ -49,11 +49,19 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { chemicalService, rowToChemical } from '../services/chemicalService';
 import { bottleService, rowToBottle } from '../services/bottleService';
 import { usageService, rowToUsageTransaction } from '../services/usageService';
-import { authService } from '../services/authService';
+import { authService, rowToUser } from '../services/authService';
 import { auditService } from '../services/auditService';
+import { alertEmailService, StockAlertLog } from '../services/alertEmailService';
+import {
+  isSeniorManagerEmail,
+  isSeniorManagerUser,
+  PRIMARY_SENIOR_MANAGER_EMAIL,
+  getRoleDisplayName,
+  canManageTargetUser as checkCanManageTargetUser,
+} from '../utils/roleUtils';
 
 const STORAGE_KEY = 'labchem_inventory_v1';
-export const DEFAULT_MANAGER_EMAIL = 'buianhtra2021@gmail.com';
+export const DEFAULT_MANAGER_EMAIL = PRIMARY_SENIOR_MANAGER_EMAIL;
 
 interface EmailSettings {
   autoEmailOnLowStock: boolean;
@@ -75,6 +83,7 @@ interface LabContextType {
   referenceDate: string;
 
   // Role permissions & Workflow
+  isSeniorManager: boolean;
   isManager: boolean;
   canExportHistory: boolean;
   canManageUsers: boolean;
@@ -253,13 +262,53 @@ interface LabContextType {
   isSupabaseConfigured: boolean;
   isRealtimeActive: boolean;
   isSyncing: boolean;
+  isLoading: boolean;
+  loadError: string | null;
   refreshFromSupabase: () => Promise<void>;
 }
 
 const LabContext = createContext<LabContextType | undefined>(undefined);
 
+export const DEFAULT_PRODUCTION_ADMIN: User = {
+  id: 'usr-admin-primary',
+  name: 'Người quản lý',
+  email: 'jasminebee279@gmail.com',
+  role: 'MANAGER',
+  status: 'ACTIVE',
+  department: 'Bộ môn Dược liệu & Chiết xuất',
+  permissions: {
+    viewInventory: true,
+    addChemical: true,
+    editChemical: true,
+    archiveChemical: true,
+    deleteChemical: true,
+    recordUsage: true,
+    viewAllUsageHistory: true,
+    createStockIn: true,
+    adjustStock: true,
+    importExcel: true,
+    viewReports: true,
+    manageUsers: true,
+  },
+};
+
 export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const referenceDate = '2026-10-01';
+
+  // One-time purge of legacy mock demo data from browser localStorage
+  if (typeof window !== 'undefined') {
+    const isCleaned = localStorage.getItem('labchem_clean_production_v4');
+    if (!isCleaned) {
+      localStorage.removeItem(`${STORAGE_KEY}_chemicals`);
+      localStorage.removeItem(`${STORAGE_KEY}_bottles`);
+      localStorage.removeItem(`${STORAGE_KEY}_transactions`);
+      localStorage.removeItem(`${STORAGE_KEY}_purchase`);
+      localStorage.removeItem(`${STORAGE_KEY}_notifications`);
+      localStorage.removeItem(`${STORAGE_KEY}_email_logs`);
+      localStorage.removeItem(`${STORAGE_KEY}_audit`);
+      localStorage.setItem('labchem_clean_production_v4', 'true');
+    }
+  }
 
   // 1. Users state
   const [users, setUsers] = useState<User[]>(() => {
@@ -268,39 +317,18 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((u: User) => {
-            const demoMatch = DEMO_USERS.find((d) => d.id === u.id);
-            const isUManager = u.role === 'MANAGER' || u.role === 'ADMIN';
-            return {
-              ...u,
-              limits: u.limits || demoMatch?.limits || {
-                maxUsagePerTransaction: isUManager ? null : 100,
-                dailyUsageLimit: isUManager ? null : 500,
-                dailyTransactionCount: isUManager ? null : 10,
-                maxStockInQuantity: isUManager ? null : 5,
-              },
-              permissions: u.permissions || demoMatch?.permissions || {
-                viewInventory: true,
-                addChemical: isUManager,
-                editChemical: isUManager,
-                archiveChemical: isUManager,
-                deleteChemical: isUManager,
-                recordUsage: true,
-                viewAllUsageHistory: isUManager,
-                createStockIn: isUManager,
-                adjustStock: isUManager,
-                importExcel: isUManager,
-                viewReports: true,
-                manageUsers: isUManager,
-              },
-            };
+          return parsed.map((u) => {
+            if (u.name?.includes('Chủ nhiệm')) {
+              return { ...u, name: 'Người quản lý' };
+            }
+            return u;
           });
         }
       } catch (e) {
         console.error(e);
       }
     }
-    return DEMO_USERS;
+    return [DEFAULT_PRODUCTION_ADMIN];
   });
 
   // Current active user
@@ -308,18 +336,34 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const savedId = localStorage.getItem(`${STORAGE_KEY}_current_user_id`);
     if (savedId) {
       const found = users.find((u) => u.id === savedId);
-      if (found) return found;
+      if (found) {
+        if (found.name?.includes('Chủ nhiệm')) {
+          return { ...found, name: 'Người quản lý' };
+        }
+        return found;
+      }
     }
-    // Default to first active manager (Bùi Anh Trà)
-    const manager = users.find((u) => u.role === 'MANAGER' && u.status === 'ACTIVE');
-    return manager || users[0] || DEMO_USERS[0];
+    const manager = users.find((u) => (u.role === 'MANAGER' || u.role === 'SENIOR_MANAGER') && u.status === 'ACTIVE');
+    return manager || users[0] || DEFAULT_PRODUCTION_ADMIN;
   });
 
   // 2. Roles & Permissions derived values
-  const isManager = currentUser.role === 'MANAGER' || currentUser.role === 'ADMIN';
+  const isSeniorManager = isSeniorManagerUser(currentUser);
+  const isManager = isSeniorManager || currentUser.role === 'MANAGER' || currentUser.role === 'ADMIN' || currentUser.role === 'LAB_MANAGER';
+  const isStaff = currentUser.role === 'STAFF';
+  const isViewer = currentUser.role === 'VIEWER';
   const canManageUsers = isManager && currentUser.status === 'ACTIVE';
-  const canExportHistory = isManager && currentUser.status === 'ACTIVE';
-  const pendingUsersCount = useMemo(() => users.filter((u) => u.status === 'PENDING').length, [users]);
+  const canExportHistory = (isManager || isStaff) && currentUser.status === 'ACTIVE';
+
+  // Ẩn Người quản lý cao cấp khỏi danh sách người dùng thông thường
+  const visibleUsers = useMemo(() => {
+    if (isSeniorManagerUser(currentUser)) {
+      return users;
+    }
+    return users.filter((u) => !isSeniorManagerEmail(u.email) && u.role !== 'SENIOR_MANAGER');
+  }, [users, currentUser]);
+
+  const pendingUsersCount = useMemo(() => visibleUsers.filter((u) => u.status === 'PENDING').length, [visibleUsers]);
 
   // Persist users & active user
   useEffect(() => {
@@ -330,115 +374,110 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(`${STORAGE_KEY}_current_user_id`, currentUser.id);
   }, [currentUser]);
 
-  // 3. Chemicals & Bottles state
+  // 3. Chemicals & Bottles state (CLEAN PRODUCTION: Default to empty array [])
   const [chemicals, setChemicals] = useState<Chemical[]>(() => {
+    if (isSupabaseConfigured()) {
+      return [];
+    }
     const saved = localStorage.getItem(`${STORAGE_KEY}_chemicals`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { console.error(e); }
     }
-    return DEMO_CHEMICALS;
+    return [];
   });
 
   const [bottles, setBottles] = useState<Bottle[]>(() => {
+    if (isSupabaseConfigured()) {
+      return [];
+    }
     const saved = localStorage.getItem(`${STORAGE_KEY}_bottles`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { console.error(e); }
     }
-    return DEMO_BOTTLES;
+    return [];
   });
 
   const [transactions, setTransactions] = useState<InventoryTransaction[]>(() => {
+    if (isSupabaseConfigured()) {
+      return [];
+    }
     const saved = localStorage.getItem(`${STORAGE_KEY}_transactions`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { console.error(e); }
     }
-    return DEMO_TRANSACTIONS;
+    return [];
   });
 
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_purchase`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) { console.error(e); }
     }
-    return DEMO_PURCHASE_LIST;
+    return [];
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_audit`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && !parsed.some((x: any) => x.id === 'audit-init')) {
+          return parsed;
+        }
+      } catch (e) { console.error(e); }
     }
-    return [
-      {
-        id: 'audit-init',
-        timestamp: '2026-10-01T08:00:00.000Z',
-        user: 'Hệ thống',
-        action: 'Khởi tạo cơ sở dữ liệu LabChem',
-        entityType: 'SETTINGS',
-        entityId: 'SYSTEM',
-        description: 'Tải bộ dữ liệu tiêu chuẩn phòng thí nghiệm Dược liệu & Chiết xuất với phân quyền Google OAuth và kiểm soát tự động.',
-      },
-    ];
+    return [];
   });
 
   // 4. Notifications & Email Alerts
   const [notifications, setNotifications] = useState<LabNotification[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_notifications`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && !parsed.some((x: any) => x.id?.startsWith('notif-'))) {
+          return parsed;
+        }
+      } catch (e) { console.error(e); }
     }
-    return [
-      {
-        id: 'notif-pending-mai',
-        timestamp: '2026-10-01T06:10:00Z',
-        type: 'NEW_USER_PENDING',
-        title: 'Tài khoản mới chờ phê duyệt',
-        message: 'Lê Thị Mai (lethimai.pending@gmail.com) vừa đăng nhập Google lần đầu. Vui lòng phê duyệt để cấp quyền sử dụng.',
-        targetRole: 'MANAGER',
-        read: false,
-        linkTab: 'users',
-      },
-      {
-        id: 'notif-hexane-low',
-        timestamp: '2026-10-01T07:45:00Z',
-        type: 'LOW_STOCK',
-        title: 'Cảnh báo tồn kho: n-Hexane 99%',
-        message: 'Tồn kho n-Hexane 99% còn 400 mL (dưới mức tối thiểu 500 mL). Đã tự động tạo đề xuất mua 1,100 mL.',
-        targetRole: 'MANAGER',
-        read: false,
-        linkTab: 'purchase',
-      },
-    ];
+    return [];
   });
 
   const [emailAlertLogs, setEmailAlertLogs] = useState<EmailAlertLog[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_email_logs`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && !parsed.some((x: any) => x.id === 'email-init-1')) {
+          return parsed;
+        }
+      } catch (e) { console.error(e); }
     }
-    return [
-      {
-        id: 'email-init-1',
-        timestamp: '2026-10-01T07:45:10Z',
-        toEmail: DEFAULT_MANAGER_EMAIL,
-        recipientName: 'Bùi Anh Trà (Lab Manager)',
-        subject: '[LabChem Cảnh Báo] Hóa chất "n-Hexane 99%" đã đạt mức cảnh báo tồn kho thấp!',
-        chemicalId: 'chem-hexane',
-        chemicalName: 'n-Hexane 99%',
-        currentStock: 400,
-        threshold: 500,
-        unit: 'mL',
-        status: 'SENT',
-        contentSnippet: 'Kính gửi Quản lý phòng lab,\n\nHóa chất n-Hexane 99% (HEX-01, CAS: 110-54-3) hiện chỉ còn 400 mL, thấp hơn mức tối thiểu quy định (500 mL). Đề xuất đặt mua bổ sung: 1,100 mL từ nhà cung cấp Merck KGaA.',
-        triggerType: 'CRITICAL_STOCK',
-      },
-    ];
+    return [];
   });
 
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_email_settings`);
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.managerEmail?.includes('buianhtraa')) {
+          parsed.managerEmail = DEFAULT_MANAGER_EMAIL;
+        }
+        return parsed;
+      } catch (e) { console.error(e); }
     }
     return {
       autoEmailOnLowStock: true,
@@ -458,44 +497,26 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return [];
   });
 
-  // 5b. Approval Requests (Section 10 & 11: Member Limit Overrides)
+  // 5b. Approval Requests (Clean Production: default to [])
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_approvals`);
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { console.error(e); }
     }
-    return [
-      {
-        id: 'req-001',
-        userId: 'user-nguyen-a',
-        userName: 'Nguyễn Văn A',
-        userEmail: 'nguyenvana.lab@gmail.com',
-        type: 'USAGE_LIMIT_EXCEEDED',
-        chemicalId: 'chem-hexane',
-        chemicalName: 'n-Hexane 99%',
-        bottleId: 'bottle-hex-001',
-        bottleCode: 'HEX-001',
-        requestedQuantity: 250,
-        unit: 'mL',
-        limitValue: 100,
-        reason: 'Cần trích ly phân đoạn lớn bình lắng 2L cho đề tài Dolichandrone',
-        status: 'PENDING',
-        requestedAt: '2026-10-01T08:15:00Z',
-      },
-    ];
+    return [];
   });
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_approvals`, JSON.stringify(approvalRequests));
   }, [approvalRequests]);
 
-  // 6. Suppliers (Mục 32)
+  // 6. Suppliers (Clean Production: default to [])
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_suppliers`);
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { console.error(e); }
     }
-    return DEMO_SUPPLIERS;
+    return [];
   });
 
   // 7. Inventory Audit Sessions (Mục 25)
@@ -610,10 +631,16 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 10. Supabase Cloud Database & Realtime Synchronization
   const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(isSupabaseConfigured());
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refreshFromSupabase = async () => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured()) {
+      setIsLoading(false);
+      return;
+    }
     setIsSyncing(true);
+    setLoadError(null);
     try {
       const [chemRes, bottleRes, txRes, userRes, auditRes] = await Promise.all([
         chemicalService.fetchAll(),
@@ -623,25 +650,27 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         auditService.fetchAll(100),
       ]);
 
-      if (chemRes.data && chemRes.data.length > 0) {
+      if (chemRes.data && !chemRes.error) {
         setChemicals(chemRes.data);
       }
-      if (bottleRes.data && bottleRes.data.length > 0) {
+      if (bottleRes.data && !bottleRes.error) {
         setBottles(bottleRes.data);
       }
-      if (txRes.data && txRes.data.length > 0) {
+      if (txRes.data && !txRes.error) {
         setTransactions(txRes.data);
       }
-      if (userRes.data && userRes.data.length > 0) {
+      if (userRes.data && !userRes.error && userRes.data.length > 0) {
         setUsers(userRes.data);
       }
-      if (auditRes.data && auditRes.data.length > 0) {
+      if (auditRes.data && !auditRes.error) {
         setAuditLogs(auditRes.data);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('refreshFromSupabase error:', err);
+      setLoadError('Không thể tải dữ liệu từ máy chủ Supabase. Vui lòng kiểm tra kết nối mạng và bấm Thử lại.');
     } finally {
       setIsSyncing(false);
+      setIsLoading(false);
     }
   };
 
@@ -652,6 +681,23 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     refreshFromSupabase();
+
+    // Supabase Auth session synchronization
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          if (profile) {
+            const userObj = rowToUser(profile);
+            setCurrentUser(userObj);
+          }
+        } catch (_) {}
+      }
+    });
 
     const channel = supabase
       .channel('labchem-realtime-channel')
@@ -719,6 +765,50 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
       .on(
         'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'stock_transactions' },
+        (payload) => {
+          const row = payload.new;
+          const newTx: InventoryTransaction = {
+            id: row.id,
+            timestamp: row.created_at || new Date().toISOString(),
+            date: (row.created_at || new Date().toISOString()).split('T')[0],
+            type: row.transaction_type,
+            chemicalId: row.chemical_id,
+            chemicalName: row.chemical_name,
+            bottleId: row.bottle_id,
+            bottleCode: row.bottle_code,
+            quantity: Number(row.quantity) || 0,
+            unit: row.unit,
+            previousStock: Number(row.quantity_before) || 0,
+            newStock: Number(row.quantity_after) || 0,
+            user: row.user_name || 'Hệ thống',
+            notes: row.notes || '',
+          };
+          setTransactions((prev) => {
+            if (prev.some((t) => t.id === newTx.id)) return prev;
+            return [newTx, ...prev];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'audit_logs' },
+        (payload) => {
+          const row = payload.new;
+          const newLog: AuditLog = {
+            id: row.id,
+            timestamp: row.created_at || new Date().toISOString(),
+            user: row.actor_name || 'Hệ thống',
+            action: row.action,
+            entityType: row.entity_type,
+            entityId: row.entity_id || '',
+            description: row.description,
+          };
+          setAuditLogs((prev) => [newLog, ...prev]);
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles' },
         (payload) => {
           if (payload.eventType === 'UPDATE') {
@@ -747,6 +837,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
     return () => {
+      authListener.subscription.unsubscribe();
       supabase.removeChannel(channel);
     };
   }, []);
@@ -824,10 +915,101 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!emailSettings.autoEmailOnLowStock) return;
     if (emailSettings.notifyCriticalOnly && triggerType !== 'CRITICAL_STOCK') return;
 
+    // Deduplication check: Do not re-send if the most recent alert for this chemical is already the same or higher severity
+    const recentAlert = emailAlertLogs.find((l) => l.chemicalId === chem.id);
+    if (recentAlert) {
+      if (triggerType === 'LOW_STOCK' && (recentAlert.triggerType === 'LOW_STOCK' || recentAlert.triggerType === 'CRITICAL_STOCK')) {
+        return;
+      }
+      if (triggerType === 'CRITICAL_STOCK' && recentAlert.triggerType === 'CRITICAL_STOCK') {
+        return;
+      }
+    }
+
     const emailId = `email-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
-    const recommended = Math.max(0, chem.targetStock - newStock);
-    const subject = `[LabChem Cảnh Báo] Hóa chất "${chem.name}" đã đạt mức cảnh báo tồn kho thấp!`;
-    const snippet = `Kính gửi Quản lý phòng lab,\n\nHệ thống ghi nhận hóa chất ${chem.name} (Mã: ${chem.code}, CAS: ${chem.casNumber}) vừa đạt mức cảnh báo.\nTồn kho hiện tại: ${newStock} ${chem.primaryUnit} (Mức tối thiểu: ${chem.minimumStock} ${chem.primaryUnit}, Cảnh báo: ${chem.warningStock} ${chem.primaryUnit}).\nĐề xuất đặt mua bổ sung: ${recommended} ${chem.primaryUnit} từ nhà cung cấp ${chem.manufacturer}.\n\nVui lòng đăng nhập hệ thống LabChem để xem xét và duyệt đơn mua sắm.`;
+    const isCritical = triggerType === 'CRITICAL_STOCK';
+    const subject = isCritical
+      ? `[LabChem] CẢNH BÁO NGUY CẤP - ${chem.name}`
+      : `[LabChem] Cảnh báo hóa chất sắp hết - ${chem.name}`;
+
+    const chemBottles = bottles.filter((b) => b.chemicalId === chem.id && b.status !== 'DISPOSED');
+    const firstBottle = chemBottles[0];
+    const bottleCode = firstBottle?.bottleCode || `${chem.code || 'BOTTLE'}-001`;
+    const lotNumber = firstBottle?.lotNumber || 'A12345';
+    const loc = chem.storageLocation ? `${chem.storageLocation.cabinet} (${chem.storageLocation.room})` : 'Cabinet C2';
+
+    let snippet = '';
+    if (isCritical) {
+      snippet = `--------------------------------
+CẢNH BÁO NGUY CẤP
+
+Hóa chất:
+${chem.name}
+
+CAS:
+${chem.casNumber || 'N/A'}
+
+Mã chai:
+${bottleCode}
+
+Số lô:
+${lotNumber}
+
+Tồn kho hiện tại:
+${newStock} ${chem.primaryUnit}
+
+Mức nguy cấp:
+${threshold} ${chem.primaryUnit}
+
+Trạng thái:
+NGUY CẤP
+
+Vị trí:
+${loc}
+
+Nhà sản xuất:
+${chem.manufacturer || 'Merck'}
+--------------------------------
+Đề nghị kiểm tra và bổ sung hóa chất.
+
+LabChem
+Hệ thống quản lý hóa chất phòng thí nghiệm.`;
+    } else {
+      snippet = `--------------------------------
+CẢNH BÁO HÓA CHẤT SẮP HẾT
+
+Hóa chất:
+${chem.name}
+
+CAS:
+${chem.casNumber || 'N/A'}
+
+Mã chai:
+${bottleCode}
+
+Số lô:
+${lotNumber}
+
+Tồn kho hiện tại:
+${newStock} ${chem.primaryUnit}
+
+Mức cảnh báo:
+${threshold} ${chem.primaryUnit}
+
+Trạng thái:
+SẮP HẾT
+
+Vị trí:
+${loc}
+
+Nhà sản xuất:
+${chem.manufacturer || 'Merck'}
+--------------------------------
+Vui lòng kiểm tra và bổ sung hóa chất khi cần.
+
+LabChem
+Hệ thống quản lý hóa chất phòng thí nghiệm.`;
+    }
 
     const newEmailLog: EmailAlertLog = {
       id: emailId,
@@ -852,19 +1034,27 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
       type: triggerType,
-      title: `[Cảnh báo tồn kho] ${chem.name} sắp hết!`,
-      message: `Tồn kho còn ${newStock} ${chem.primaryUnit} (ngưỡng: ${threshold} ${chem.primaryUnit}). Đã tự động gửi email thông báo tới ${emailSettings.managerEmail}.`,
+      title: isCritical ? `[NGUY CẤP] ${chem.name} sắp cạn kho!` : `[Cảnh báo tồn kho] ${chem.name} sắp hết!`,
+      message: `Tồn kho còn ${newStock} ${chem.primaryUnit} (ngưỡng: ${threshold} ${chem.primaryUnit}). Đã gửi email thông báo tới ${emailSettings.managerEmail}.`,
       targetRole: 'MANAGER',
       read: false,
       linkTab: 'purchase',
     };
     setNotifications((prev) => [newNotif, ...prev]);
 
+    // Trigger Supabase Edge Function asynchronously
+    if (isSupabaseConfigured()) {
+      alertEmailService.checkStockAndTriggerAlert({
+        chemicalId: chem.id,
+        recipientEmail: emailSettings.managerEmail,
+      }).catch((e) => console.warn('Trigger Edge Function alert notice:', e));
+    }
+
     logAudit(
       'GỬI EMAIL CẢNH BÁO TỒN KHO TỰ ĐỘNG',
       'CHEMICAL',
       chem.id,
-      `Đã tự động gửi email cảnh báo tồn kho thấp của "${chem.name}" (${newStock} ${chem.primaryUnit}) tới ${emailSettings.managerEmail}`
+      `Đã gửi email cảnh báo tồn kho (${isCritical ? 'NGUY CẤP' : 'SẮP HẾT'}) của "${chem.name}" (${newStock} ${chem.primaryUnit}) tới ${emailSettings.managerEmail}`
     );
   };
 
@@ -928,6 +1118,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const recommended = calculateRecommendedPurchase(newTotalStock, chem.targetStock, chem.warningStock);
 
     if (priority === 'NORMAL') {
+      // Section 9: Reset trạng thái cảnh báo khi kho được bổ sung trở lại NORMAL (> warningStock/minimum_stock)
+      setEmailAlertLogs((prev) => prev.filter((l) => l.chemicalId !== chem.id));
       if (existingIdx >= 0 && currentPurchaseList[existingIdx].status === 'PENDING') {
         return currentPurchaseList.filter((p) => p.chemicalId !== chem.id);
       }
@@ -1170,49 +1362,40 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // 1 & 2: PHÂN CẤP QUYỀN & XÁC ĐỊNH ACCOUNT THUỘC QUYỀN MANAGER
-  const isSuperAdmin =
-    currentUser.role === 'ADMIN' ||
-    currentUser.email.toLowerCase() === DEFAULT_MANAGER_EMAIL.toLowerCase();
+  const isSuperAdmin = isSeniorManagerUser(currentUser);
 
   const canManageTargetUser = (target: User): { allowed: boolean; message: string } => {
+    // 1. Không ai được xóa / sửa / hạ quyền Người quản lý cao cấp
+    if (isSeniorManagerUser(target)) {
+      if (isSeniorManagerUser(currentUser) && currentUser.id === target.id) {
+        return { allowed: true, message: '' };
+      }
+      return {
+        allowed: false,
+        message: 'Tài khoản Người quản lý cao cấp được bảo vệ tuyệt đối, không thể sửa đổi hoặc xóa!',
+      };
+    }
+
     if (!isManager) {
       return {
         allowed: false,
-        message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền quản lý thành viên.',
+        message: 'ACCESS DENIED: 403 Forbidden. Chỉ Người quản lý mới có quyền quản lý thành viên.',
       };
     }
 
-    if (isSuperAdmin) {
+    if (isSeniorManagerUser(currentUser)) {
       return { allowed: true, message: '' };
     }
 
-    // Không thể can thiệp vào tài khoản Super Admin / Quản trị viên cấp cao
-    if (target.role === 'ADMIN') {
-      return {
-        allowed: false,
-        message: 'ACCESS DENIED: 403 Forbidden. Không có quyền sửa đổi hoặc xóa Quản trị viên cấp cao (ADMIN).',
-      };
-    }
-
-    // Không được tự ý sửa/xóa Manager khác (trừ khi là chính mình hoặc quy trình xóa Manager đã Deactivated hợp lệ)
+    // Không được tự ý sửa/xóa Manager khác
     if (
-      (target.role === 'MANAGER' || target.role === 'LAB_MANAGER') &&
+      (target.role === 'MANAGER' || target.role === 'ADMIN' || target.role === 'LAB_MANAGER') &&
       target.id !== currentUser.id
     ) {
       return {
         allowed: false,
-        message: 'ACCESS DENIED: 403 Forbidden. Không được tự ý sửa đổi hoặc can thiệp tài khoản của Quản lý khác.',
+        message: 'ACCESS DENIED: Chỉ Người quản lý cao cấp mới có quyền quản lý Người quản lý khác.',
       };
-    }
-
-    // Đối với User thông thường: Phải thuộc quyền quản lý của Manager hiện tại (user.manager_id = current_manager.id)
-    if (target.role === 'USER' || target.role === 'MEMBER') {
-      if (target.manager_id && target.manager_id !== currentUser.id) {
-        return {
-          allowed: false,
-          message: `ACCESS DENIED: 403 Forbidden. Thành viên "${target.name}" thuộc phạm vi quản lý của ${target.manager_name || 'Manager khác'}. Bạn không có thẩm quyền thao tác.`,
-        };
-      }
     }
 
     return { allowed: true, message: '' };
@@ -2228,19 +2411,31 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         targetBottleCode = b.bottleCode;
       }
     } else {
-      const existingChemBottles = bottles.filter((b) => b.chemicalId === chemicalId);
-      const nextNum = existingChemBottles.length + 1;
-      const codePrefix = chem.code ? chem.code.split('-')[0] : 'BOT';
-      const autoCode = bottleCode || `${codePrefix}-${String(nextNum).padStart(3, '0')}`;
+      const codePrefix = chem.code
+        ? chem.code.split('-')[0].trim().toUpperCase()
+        : chem.name.substring(0, 3).trim().toUpperCase();
 
-      // Requirement 16: Check duplicate bottle code
-      const isDuplicate = bottles.some((b) => b.bottleCode.toLowerCase() === autoCode.toLowerCase() && b.status !== 'ARCHIVED');
-      if (isDuplicate) {
-        return {
-          success: false,
-          message: `Bottle ${autoCode} đã tồn tại trong hệ thống. Không thể nhập kho trùng mã chai.`,
-        };
+      let candidateNum = 1;
+      let candidateCode = bottleCode ? bottleCode.trim() : `${codePrefix}-${String(candidateNum).padStart(3, '0')}`;
+
+      if (!bottleCode) {
+        while (bottles.some((b) => b.bottleCode.toLowerCase() === candidateCode.toLowerCase())) {
+          candidateNum++;
+          candidateCode = `${codePrefix}-${String(candidateNum).padStart(3, '0')}`;
+        }
+      } else {
+        const isDuplicate = bottles.some(
+          (b) => b.bottleCode.toLowerCase() === candidateCode.toLowerCase() && b.status !== 'ARCHIVED'
+        );
+        if (isDuplicate) {
+          return {
+            success: false,
+            message: `Mã chai ${candidateCode} đã tồn tại trong hệ thống. Vui lòng nhập mã khác hoặc để trống để hệ thống tự cấp mã duy nhất.`,
+          };
+        }
       }
+      const autoCode = candidateCode;
+      const nextNum = candidateNum;
 
       const newBottleId = `bottle-${chem.id}-${Date.now().toString(36)}`;
       const newStatus = calculateBottleStatus(quantity, quantity, expiryDate, referenceDate);
@@ -2334,6 +2529,33 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       targetBottleId,
       `${currentUser.name} nhập kho chai ${targetBottleCode} (${chem.name}): +${quantity} ${unit}. Tổng tồn mới: ${newTotal} ${chem.primaryUnit}.`
     );
+
+    if (isSupabaseConfigured()) {
+      supabase.from('stock_transactions').insert({
+        chemical_id: chem.id,
+        chemical_name: chem.name,
+        bottle_id: targetBottleId,
+        bottle_code: targetBottleCode,
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        transaction_type: 'IMPORT',
+        quantity: quantity,
+        unit: unit,
+        quantity_before: newTotal - (convertUnit(quantity, unit, chem.primaryUnit) || quantity),
+        quantity_after: newTotal,
+        reference_id: txId,
+        notes: `Nhập kho Lot: ${lotNumber || 'N/A'}${supplier ? ` từ ${supplier}` : ''}`,
+      }).then(() => {});
+
+      auditService.log({
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+        action: 'STOCK_IN',
+        entityType: 'BOTTLE',
+        entityId: targetBottleId,
+        description: `${currentUser.name} nhập kho chai ${targetBottleCode} (${chem.name}): +${quantity} ${unit}. Tổng tồn mới: ${newTotal} ${chem.primaryUnit}.`,
+      });
+    }
 
     return {
       success: true,
@@ -2674,10 +2896,102 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendManualTestEmailAlert = (chemicalId?: string) => {
     const chem = chemicalId ? chemicals.find((c) => c.id === chemicalId) : chemicals[0];
-    if (!chem) return { success: false, message: 'Không tìm thấy hóa chất để thử nghiệm.' };
+    const chemName = chem ? chem.name : 'n-Hexane';
+    const casNum = chem ? chem.casNumber : '110-54-3';
+    const bottleCode = 'HEX-TEST-001';
+    const lotNum = 'A12345';
+    const currentStock = 450;
+    const minStock = 600;
+    const critStock = 200;
+    const unit = chem ? chem.primaryUnit : 'mL';
 
-    const { total } = getChemicalTotalStock(chem.id);
-    dispatchAutomatedEmailAlert(chem, total, chem.warningStock, 'LOW_STOCK');
+    const subject = `[LabChem] Cảnh báo hóa chất sắp hết - ${chemName}`;
+    const snippet = `--------------------------------
+CẢNH BÁO TỒN KHO HÓA CHẤT
+
+Hóa chất:
+${chemName}
+
+CAS:
+${casNum}
+
+Mã chai:
+${bottleCode}
+
+Số lô:
+${lotNum}
+
+Tồn kho hiện tại:
+${currentStock} ${unit}
+
+Mức cảnh báo:
+${minStock} ${unit}
+
+Trạng thái:
+SẮP HẾT
+
+Vị trí:
+Cabinet C2
+
+Nhà sản xuất:
+Merck
+
+--------------------------------
+Vui lòng kiểm tra và bổ sung hóa chất khi cần.
+
+LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
+
+    const newEmailLog: EmailAlertLog = {
+      id: `email-test-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      toEmail: emailSettings.managerEmail,
+      recipientName: 'Quản lý phòng thí nghiệm',
+      subject,
+      chemicalId: chem?.id || 'chem-hexane-test',
+      chemicalName: chemName,
+      currentStock,
+      threshold: minStock,
+      unit,
+      status: 'SENT',
+      contentSnippet: snippet,
+      triggerType: 'LOW_STOCK',
+    };
+
+    setEmailAlertLogs((prev) => [newEmailLog, ...prev]);
+
+    // Push into in-app notifications
+    const newNotif: LabNotification = {
+      id: `notif-test-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'LOW_STOCK',
+      title: `[Thử nghiệm] Cảnh báo tồn kho ${chemName}`,
+      message: `Đã kích hoạt gửi email cảnh báo thử nghiệm tới ${emailSettings.managerEmail}.`,
+      targetRole: 'MANAGER',
+      read: false,
+      linkTab: 'dashboard',
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+
+    // Async trigger Edge Function
+    if (isSupabaseConfigured()) {
+      alertEmailService.sendTestAlert({
+        recipientEmail: emailSettings.managerEmail,
+        chemicalName: chemName,
+        bottleCode,
+        currentStock,
+        minimumStock: minStock,
+        criticalStock: critStock,
+        unit,
+      }).catch((e) => console.warn('Send test alert notice:', e));
+    }
+
+    logAudit(
+      'GỬI THỬ EMAIL CẢNH BÁO',
+      'SETTINGS',
+      'EMAIL',
+      `Đã kích hoạt gửi thử email cảnh báo tồn kho cho ${chemName} tới ${emailSettings.managerEmail}`
+    );
+
     return {
       success: true,
       message: `Đã gửi email thử nghiệm cảnh báo tồn kho tới ${emailSettings.managerEmail} thành công!`,
@@ -3079,6 +3393,36 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `${currentUser.name} thanh lý chai ${bottle.bottleCode} (${finalDisposalVol} ${bottle.unit}). Lý do: ${reason}`
     );
 
+    if (isSupabaseConfigured()) {
+      bottleService.updateQuantity(bottle.id, 0, 'DISPOSED').catch((err) => console.warn('Supabase dispose bottle error:', err));
+      supabase.from('stock_transactions').insert({
+        chemical_id: bottle.chemicalId,
+        chemical_name: chem ? chem.name : bottle.chemicalId,
+        bottle_id: bottle.id,
+        bottle_code: bottle.bottleCode,
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        transaction_type: 'DISPOSAL',
+        quantity: finalDisposalVol,
+        unit: bottle.unit,
+        quantity_before: prevVol,
+        quantity_after: 0,
+        reference_id: txId,
+        notes: `[Thanh lý chai] Lý do: ${reason}. ${notes || ''}`,
+      }).then(() => {});
+
+      auditService.log({
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+        action: 'DISPOSE_BOTTLE',
+        entityType: 'BOTTLE',
+        entityId: bottle.id,
+        description: `${currentUser.name} thanh lý chai ${bottle.bottleCode} (${finalDisposalVol} ${bottle.unit}). Lý do: ${reason}`,
+        oldData: { current_quantity: prevVol, status: bottle.status },
+        newData: { current_quantity: 0, status: 'DISPOSED' },
+      });
+    }
+
     return {
       success: true,
       message: `Đã thanh lý chai ${bottle.bottleCode}. Lượng tồn giảm ${finalDisposalVol} ${bottle.unit} về 0. Lịch sử giao dịch được bảo toàn vĩnh viễn.`,
@@ -3141,9 +3485,52 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `${currentUser.name} điều chỉnh tồn kho chai ${bottle.bottleCode} (${chem?.name}): ${prevVol} → ${newVol} ${bottle.unit} (${diff >= 0 ? '+' : ''}${diff}). Lý do: ${reason}`
     );
 
+    // Sync to Supabase Multi-user database & Realtime
+    if (isSupabaseConfigured()) {
+      supabase
+        .rpc('adjust_bottle_stock', {
+          p_bottle_id: bottle.id,
+          p_physical_quantity: newVol,
+          p_reason: reason,
+          p_notes: notes || null,
+        })
+        .then(({ data, error }) => {
+          if (error) {
+            console.warn('RPC adjust_bottle_stock fallback to direct manager update:', error.message);
+            // Fallback: Direct manager update with RLS
+            bottleService.updateQuantity(bottle.id, newVol, newStatus);
+            supabase.from('stock_transactions').insert({
+              chemical_id: bottle.chemicalId,
+              chemical_name: chem ? chem.name : bottle.chemicalId,
+              bottle_id: bottle.id,
+              bottle_code: bottle.bottleCode,
+              user_id: currentUser.id,
+              user_name: currentUser.name,
+              transaction_type: 'ADJUSTMENT',
+              quantity: Math.abs(diff),
+              unit: bottle.unit,
+              quantity_before: prevVol,
+              quantity_after: newVol,
+              reference_id: txId,
+              notes: `[Điều chỉnh tồn kho thực tế] ${reason}. ${notes || ''}`,
+            }).then(() => {});
+            auditService.log({
+              actorId: currentUser.id,
+              actorName: currentUser.name,
+              action: 'STOCK_ADJUSTMENT',
+              entityType: 'BOTTLE',
+              entityId: bottle.id,
+              description: `${currentUser.name} điều chỉnh tồn kho chai ${bottle.bottleCode} (${chem?.name}): ${prevVol} → ${newVol} ${bottle.unit} (${diff >= 0 ? '+' : ''}${diff}). Lý do: ${reason}`,
+              oldData: { current_quantity: prevVol, status: bottle.status },
+              newData: { current_quantity: newVol, status: newStatus },
+            });
+          }
+        });
+    }
+
     return {
       success: true,
-      message: `Đã điều chỉnh tồn kho chai ${bottle.bottleCode}: ${prevVol} → ${newVol} ${bottle.unit} (${diff >= 0 ? '+' : ''}${diff}). Đã tạo giao dịch và lưu Audit Log.`,
+      message: `Đã điều chỉnh tồn kho chai ${bottle.bottleCode}: ${prevVol} → ${newVol} ${bottle.unit} (${diff >= 0 ? '+' : ''}${diff}). Đã đồng bộ lên Supabase Cloud và phát Realtime tới toàn bộ người dùng.`,
     };
   };
 
@@ -3598,11 +3985,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         transactions,
         purchaseItems,
         auditLogs,
-        users,
+        users: visibleUsers,
         currentUser,
         setCurrentUser,
         referenceDate,
 
+        isSeniorManager,
         isManager,
         canExportHistory,
         canManageUsers,
@@ -3698,6 +4086,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSupabaseConfigured: isSupabaseConfigured(),
         isRealtimeActive,
         isSyncing,
+        isLoading,
+        loadError,
         refreshFromSupabase,
       }}
     >

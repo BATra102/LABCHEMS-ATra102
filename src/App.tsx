@@ -67,6 +67,17 @@ function MainApp() {
   // Search sync state
   const [inventorySearchTerm, setInventorySearchTerm] = useState<string>('');
   const [targetChemicalId, setTargetChemicalId] = useState<string | undefined>();
+  const [inventoryInitialFilter, setInventoryInitialFilter] = useState<string | undefined>();
+  const [expiryInitialFilter, setExpiryInitialFilter] = useState<string | undefined>();
+
+  const handleNavigateWithFilter = (tab: TabType, filter?: string) => {
+    if (tab === 'inventory') {
+      setInventoryInitialFilter(filter);
+    } else if (tab === 'expiry') {
+      setExpiryInitialFilter(filter);
+    }
+    setActiveTab(tab);
+  };
 
   const { bottles, isManager, currentUser, refreshFromSupabase } = useLab();
 
@@ -157,6 +168,7 @@ function MainApp() {
           isManager ? (
             <DashboardView
               onNavigateToTab={setActiveTab}
+              onNavigateWithFilter={handleNavigateWithFilter}
               onOpenRecordUsage={handleOpenRecordUsage}
               onOpenStockIn={handleOpenStockIn}
               onOpenBottleDetail={handleOpenBottleDetail}
@@ -168,6 +180,7 @@ function MainApp() {
           ) : (
             <UserDashboardView
               onNavigateToTab={setActiveTab}
+              onNavigateWithFilter={handleNavigateWithFilter}
               onOpenRecordUsage={handleOpenRecordUsage}
               onOpenQrScanner={() => setQrScannerOpen(true)}
               onOpenBottleDetail={handleOpenBottleDetail}
@@ -190,6 +203,7 @@ function MainApp() {
             onOpenDeleteChemical={handleOpenDeleteChemical}
             externalSearchTerm={inventorySearchTerm}
             targetChemicalId={targetChemicalId}
+            initialFilterStatus={inventoryInitialFilter}
           />
         )}
 
@@ -208,6 +222,7 @@ function MainApp() {
           <ExpiryView
             onOpenBottleDetail={handleOpenBottleDetail}
             onOpenRecordUsage={handleOpenRecordUsage}
+            initialFilterGroup={expiryInitialFilter}
           />
         )}
 

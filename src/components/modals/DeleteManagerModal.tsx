@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLab } from '../../context/LabContext';
 import { User } from '../../types';
+import { isSeniorManagerUser } from '../../utils/roleUtils';
 import {
   AlertTriangle,
   X,
@@ -62,6 +63,11 @@ export const DeleteManagerModal: React.FC<Props> = ({
   const permCheck = canManageTargetUser(user);
 
   const handleDelete = () => {
+    if (isSeniorManagerUser(user)) {
+      setErrorMsg('Tài khoản Người quản lý cao cấp được bảo vệ tuyệt đối, không thể xóa!');
+      return;
+    }
+
     if (!isEmailMatching) {
       setErrorMsg('Email xác nhận không khớp. Vui lòng nhập chính xác email của tài khoản.');
       return;

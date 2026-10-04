@@ -1,9 +1,10 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, UserLimits, UserPermissions, UserRole, UserStatus } from '../types';
 import { rowToUser } from './authService';
+import { isSeniorManagerEmail } from '../utils/roleUtils';
 
 export const userService = {
-  async fetchAll(): Promise<{ data: User[] | null; error: any }> {
+  async fetchAll(callerEmail?: string): Promise<{ data: User[] | null; error: any }> {
     if (!isSupabaseConfigured()) {
       return { data: null, error: new Error('Supabase chưa cấu hình') };
     }
@@ -15,7 +16,15 @@ export const userService = {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return { data: (data || []).map(rowToUser), error: null };
+      const allUsers = (data || []).map(rowToUser);
+
+      // Ẩn Người quản lý cao cấp khỏi danh sách nếu caller không phải là Người quản lý cao cấp
+      const isCallerSenior = isSeniorManagerEmail(callerEmail);
+      const filtered = isCallerSenior
+        ? allUsers
+        : allUsers.filter((u) => !isSeniorManagerEmail(u.email) && u.role !== 'SENIOR_MANAGER');
+
+      return { data: filtered, error: null };
     } catch (err: any) {
       console.error('userService.fetchAll error:', err);
       return { data: null, error: err };
@@ -41,12 +50,29 @@ export const userService = {
     }
   },
 
-  async updateUser(id: string, updates: Partial<User>): Promise<{ success: boolean; error: any }> {
+  async updateUser(id: string, updates: Partial<User>, callerEmail?: string): Promise<{ success: boolean; error: any }> {
     if (!isSupabaseConfigured()) {
       return { success: false, error: new Error('Supabase chưa cấu hình') };
     }
 
     try {
+      // 1. Kiểm tra tài khoản đích có phải Người quản lý cao cấp không
+      const { data: targetProfile } = await supabase
+        .from('profiles')
+        .select('email, role')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (targetProfile && (isSeniorManagerEmail(targetProfile.email) || targetProfile.role === 'SENIOR_MANAGER')) {
+        const isCallerSenior = isSeniorManagerEmail(callerEmail);
+        if (!isCallerSenior) {
+          return {
+            success: false,
+            error: new Error('Tài khoản Người quản lý cao cấp được bảo vệ tuyệt đối, không thể sửa đổi hoặc xóa!'),
+          };
+        }
+      }
+
       const payload: any = { updated_at: new Date().toISOString() };
       if (updates.name !== undefined) payload.full_name = updates.name;
       if (updates.role !== undefined) payload.role = updates.role;
@@ -78,39 +104,47 @@ export const userService = {
     }
   },
 
-  async changeRole(id: string, role: UserRole): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, { role });
+  async changeRole(id: string, role: UserRole, callerEmail?: string): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(id, { role }, callerEmail);
   },
 
-  async changeStatus(id: string, status: UserStatus): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, { status });
+  async changeStatus(id: string, status: UserStatus, callerEmail?: string): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(id, { status }, callerEmail);
   },
 
-  async updateLimits(id: string, limits: UserLimits): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, { limits });
+  async updateLimits(id: string, limits: UserLimits, callerEmail?: string): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(id, { limits }, callerEmail);
   },
 
-  async updatePermissions(id: string, permissions: UserPermissions): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, { permissions });
+  async updatePermissions(id: string, permissions: UserPermissions, callerEmail?: string): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(id, { permissions }, callerEmail);
   },
 
-  async softDelete(id: string, reason: string, deletedBy: { id: string; name: string }): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, {
-      status: 'INACTIVE',
-      deleted_at: new Date().toISOString(),
-      deleted_by: deletedBy.id,
-      deleted_by_name: deletedBy.name,
-      deletion_reason: reason,
-    });
+  async softDelete(id: string, reason: string, deletedBy: { id: string; name: string; email?: string }): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(
+      id,
+      {
+        status: 'INACTIVE',
+        deleted_at: new Date().toISOString(),
+        deleted_by: deletedBy.id,
+        deleted_by_name: deletedBy.name,
+        deletion_reason: reason,
+      },
+      deletedBy.email
+    );
   },
 
-  async restoreUser(id: string): Promise<{ success: boolean; error: any }> {
-    return this.updateUser(id, {
-      status: 'ACTIVE',
-      deleted_at: null,
-      deleted_by: null,
-      deleted_by_name: null,
-      deletion_reason: null,
-    });
+  async restoreUser(id: string, callerEmail?: string): Promise<{ success: boolean; error: any }> {
+    return this.updateUser(
+      id,
+      {
+        status: 'ACTIVE',
+        deleted_at: null,
+        deleted_by: null,
+        deleted_by_name: null,
+        deletion_reason: null,
+      },
+      callerEmail
+    );
   },
 };

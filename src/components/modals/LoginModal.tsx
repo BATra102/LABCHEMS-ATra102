@@ -3,6 +3,7 @@ import { useLab, DEFAULT_MANAGER_EMAIL } from '../../context/LabContext';
 import { User, UserRole } from '../../types';
 import { authService } from '../../services/authService';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { getRoleDisplayName, isSeniorManagerUser, isSeniorManagerEmail } from '../../utils/roleUtils';
 import {
   X,
   LogIn,
@@ -337,18 +338,20 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   <span>Quy trình bảo mật Google OAuth:</span>
                 </div>
                 <div>• Email Google là định danh duy nhất của user. Ứng dụng không lưu mật khẩu.</div>
-                <div>• Tài khoản mới đăng nhập lần đầu sẽ ở trạng thái <strong>PENDING</strong> chờ Manager phê duyệt.</div>
-                <div>• Email <strong>{DEFAULT_MANAGER_EMAIL}</strong> tự động nhận quyền <strong>MANAGER</strong>.</div>
+                <div>• Tài khoản mới đăng nhập lần đầu sẽ ở trạng thái <strong>PENDING</strong> chờ Người quản lý phê duyệt.</div>
+                <div>• Tài khoản Người quản lý cao cấp tự động nhận toàn quyền quản trị hệ thống.</div>
               </div>
             </div>
           ) : (
             /* Tab: Switch User */
             <div className="space-y-2 max-h-[360px] overflow-y-auto">
               <div className="text-[11px] text-slate-500 pb-1">
-                Danh sách toàn bộ {users.length} tài khoản trong hệ thống:
+                Danh sách tài khoản trong hệ thống:
               </div>
 
-              {users.map((u) => {
+              {users
+                .filter((u) => isSeniorManagerUser(currentUser) || (!isSeniorManagerEmail(u.email) && u.role !== 'SENIOR_MANAGER'))
+                .map((u) => {
                 const isCurrent = u.id === currentUser.id;
                 return (
                   <button
@@ -356,7 +359,7 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     type="button"
                     onClick={() => {
                       setCurrentUser(u);
-                      setMessage(`Đã chuyển sang tài khoản: ${u.name} (${u.role})`);
+                      setMessage(`Đã chuyển sang tài khoản: ${u.name} (${getRoleDisplayName(u.role, u.email)})`);
                       setTimeout(() => {
                         setMessage(null);
                         onClose();
@@ -377,12 +380,14 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
                           <span className="font-bold text-slate-900 text-xs">{u.name}</span>
                           <span
                             className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
-                              u.role === 'MANAGER' || u.role === 'ADMIN'
+                              isSeniorManagerUser(u)
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : u.role === 'MANAGER' || u.role === 'ADMIN'
                                 ? 'bg-purple-100 text-purple-700'
                                 : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            {u.role}
+                            {getRoleDisplayName(u.role, u.email)}
                           </span>
                           <span
                             className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
