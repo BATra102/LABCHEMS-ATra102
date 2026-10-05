@@ -54,7 +54,11 @@ export const bottleService = {
       const formatted = (data || []).map(rowToBottle);
       return { data: formatted, error: null };
     } catch (error: any) {
-      console.error('bottleService.fetchAll error:', error);
+      if (error?.code !== '42501') {
+        console.error('bottleService.fetchAll error:', error);
+      } else {
+        console.warn('bottleService.fetchAll (permission denied or unauthenticated):', error.message);
+      }
       return { data: null, error };
     }
   },

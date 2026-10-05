@@ -78,7 +78,11 @@ export const chemicalService = {
       const formatted = (data || []).map(rowToChemical);
       return { data: formatted, error: null };
     } catch (error: any) {
-      console.error('chemicalService.fetchAll error:', error);
+      if (error?.code !== '42501') {
+        console.error('chemicalService.fetchAll error:', error);
+      } else {
+        console.warn('chemicalService.fetchAll (permission denied or unauthenticated):', error.message);
+      }
       return { data: null, error };
     }
   },

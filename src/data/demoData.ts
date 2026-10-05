@@ -2,6 +2,37 @@ import { Chemical, Bottle, InventoryTransaction, User, PurchaseItem, Supplier } 
 
 export const DEMO_USERS: User[] = [
   {
+    id: 'usr-admin-primary',
+    name: 'Người quản lý',
+    email: 'jasminebee279@gmail.com',
+    role: 'MANAGER',
+    status: 'ACTIVE',
+    department: 'Bộ môn Dược liệu & Chiết xuất',
+    position: 'Quản lý phòng lab chính',
+    dateJoined: '2024-01-15',
+    lastLogin: '2026-10-01T08:30:00Z',
+    limits: {
+      maxUsagePerTransaction: null,
+      dailyUsageLimit: null,
+      dailyTransactionCount: null,
+      maxStockInQuantity: null,
+    },
+    permissions: {
+      viewInventory: true,
+      addChemical: true,
+      editChemical: true,
+      archiveChemical: true,
+      deleteChemical: true,
+      recordUsage: true,
+      viewAllUsageHistory: true,
+      createStockIn: true,
+      adjustStock: true,
+      importExcel: true,
+      viewReports: true,
+      manageUsers: true,
+    },
+  },
+  {
     id: 'user-tra',
     name: 'Bùi Anh Trà',
     email: 'buianhtra2021@gmail.com',

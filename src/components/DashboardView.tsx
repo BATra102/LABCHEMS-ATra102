@@ -36,6 +36,7 @@ import { DashboardStatsDetailModal, DashboardModalType } from './modals/Dashboar
 
 interface Props {
   onNavigateToTab: (tab: any) => void;
+  onNavigateWithFilter?: (tab: any, filter?: string) => void;
   onOpenRecordUsage: (chemicalId?: string) => void;
   onOpenStockIn: (chemicalId?: string) => void;
   onOpenBottleDetail?: (bottleId: string) => void;
@@ -47,6 +48,7 @@ interface Props {
 
 export const DashboardView: React.FC<Props> = ({
   onNavigateToTab,
+  onNavigateWithFilter,
   onOpenRecordUsage,
   onOpenStockIn,
   onOpenBottleDetail,

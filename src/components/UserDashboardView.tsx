@@ -24,6 +24,7 @@ import { getStockStatusLabel } from '../utils/status';
 
 interface Props {
   onNavigateToTab: (tab: 'dashboard' | 'inventory' | 'usage') => void;
+  onNavigateWithFilter?: (tab: any, filter?: string) => void;
   onOpenRecordUsage: (chemicalId?: string, bottleId?: string) => void;
   onOpenQrScanner: () => void;
   onOpenBottleDetail?: (bottleId: string) => void;
@@ -33,6 +34,7 @@ interface Props {
 
 export const UserDashboardView: React.FC<Props> = ({
   onNavigateToTab,
+  onNavigateWithFilter,
   onOpenRecordUsage,
   onOpenQrScanner,
   onOpenBottleDetail,

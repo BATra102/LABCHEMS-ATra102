@@ -38,6 +38,7 @@ interface Props {
   onOpenDeleteChemical?: (chemical: Chemical) => void;
   externalSearchTerm?: string;
   targetChemicalId?: string;
+  initialFilterStatus?: string;
 }
 
 export const InventoryView: React.FC<Props> = ({
@@ -52,6 +53,7 @@ export const InventoryView: React.FC<Props> = ({
   onOpenDeleteChemical,
   externalSearchTerm,
   targetChemicalId,
+  initialFilterStatus,
 }) => {
   const {
     chemicals,
@@ -94,7 +96,7 @@ export const InventoryView: React.FC<Props> = ({
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState(externalSearchTerm || '');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [selectedStockStatus, setSelectedStockStatus] = useState<string>('ALL');
+  const [selectedStockStatus, setSelectedStockStatus] = useState<string>(initialFilterStatus || 'ALL');
   const [selectedExpiryStatus, setSelectedExpiryStatus] = useState<string>('ALL');
   const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
 

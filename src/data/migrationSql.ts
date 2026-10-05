@@ -1245,4 +1245,15 @@ INSERT INTO public.departments (id, name, description) VALUES
   ('d3333333-3333-3333-3333-333333333333', 'Bộ môn Hóa dược', 'Nghiên cứu tổng hợp dẫn xuất và kiểm nghiệm bán thành phẩm dược phẩm')
 ON CONFLICT (name) DO NOTHING;
 
+-- ====================================================================
+-- SECTION 20: GRANT SCHEMA & TABLE PRIVILEGES TO anon, authenticated
+-- ====================================================================
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON ROUTINES TO anon, authenticated, service_role;
+
 `;

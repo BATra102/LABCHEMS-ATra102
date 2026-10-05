@@ -44,7 +44,8 @@ interface Props {
   onOpenRecordUsage: (chemicalId?: string) => void;
   onOpenStockIn: (chemicalId?: string) => void;
   onOpenAddChemical: () => void;
-  onOpenLogin: () => void;
+  onOpenLogin?: () => void;
+  onSignOut?: () => void;
   onOpenUserProfile?: () => void;
   onOpenMobileMenu?: () => void;
   onOpenEmailAlerts?: () => void;
@@ -54,6 +55,7 @@ interface Props {
   onOpenQrScanner?: () => void;
   onOpenUserGuide?: () => void;
   onOpenSupabaseConfig?: () => void;
+  onSignOutToLogin?: () => void;
 }
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -92,6 +94,8 @@ export const Header: React.FC<Props> = ({
   onOpenQrScanner,
   onOpenUserGuide,
   onOpenSupabaseConfig,
+  onSignOutToLogin,
+  onSignOut,
 }) => {
   const {
     chemicals,
@@ -718,41 +722,24 @@ export const Header: React.FC<Props> = ({
                     </div>
                   )}
 
-                  {/* Switch to different Google Account / Sign out */}
-                  <div className="p-2 border-b border-slate-100">
+                  {/* Sign out */}
+                  <div className="p-2">
                     <button
                       onClick={() => {
                         setUserDropdownOpen(false);
-                        onOpenLogin();
+                        if (onSignOut) {
+                          onSignOut();
+                        } else if (onSignOutToLogin) {
+                          onSignOutToLogin();
+                        } else if (onOpenLogin) {
+                          onOpenLogin();
+                        }
                       }}
                       className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                     >
                       <LogOut className="w-4 h-4" />
-                      <span>Đăng Xuất / Đổi User</span>
+                      <span>Đăng Xuất</span>
                     </button>
-                  </div>
-
-                  {/* Fast Switch between existing demo users */}
-                  <div className="p-2 space-y-1">
-                    <div className="text-[10px] font-semibold text-slate-400 px-2 uppercase">Chọn tài khoản nhanh:</div>
-                    {users.slice(0, 4).map((u) => (
-                      <button
-                        key={u.id}
-                        onClick={() => {
-                          setCurrentUser(u);
-                          setUserDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition-colors ${
-                          u.id === currentUser.id ? 'bg-cyan-50 text-cyan-900 font-semibold' : 'hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="truncate">
-                          <div className="truncate text-slate-800">{u.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono truncate">{u.role} · {u.status}</div>
-                        </div>
-                        {u.id === currentUser.id && <Check className="w-4 h-4 text-cyan-600 shrink-0" />}
-                      </button>
-                    ))}
                   </div>
 
                   {/* Actions ONLY for Manager (Mục 3: User KHÔNG nhìn thấy Quản lý User) */}

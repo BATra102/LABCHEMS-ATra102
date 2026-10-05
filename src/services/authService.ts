@@ -50,10 +50,54 @@ export const rowToUser = (row: any): User => {
     deleted_by: row.deleted_by || undefined,
     deleted_by_name: row.deleted_by_name || undefined,
     deletion_reason: row.deletion_reason || undefined,
+    must_change_password: Boolean(row.must_change_password),
   };
 };
 
 export const authService = {
+  async signInWithPassword(email: string, password: string) {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase chưa được cấu hình.');
+    }
+    return supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+  },
+
+  async signUpWithPassword(email: string, password: string, fullName?: string) {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase chưa được cấu hình.');
+    }
+    return supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
+        },
+      },
+    });
+  },
+
+  async resetPasswordForEmail(email: string, redirectTo?: string) {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase chưa được cấu hình.');
+    }
+    return supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo || window.location.origin,
+    });
+  },
+
+  async updateUserPassword(newPassword: string) {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase chưa được cấu hình.');
+    }
+    return supabase.auth.updateUser({
+      password: newPassword,
+    });
+  },
+
   async signInWithGoogle() {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase chưa được cấu hình. Vui lòng nhập Project URL và Publishable Key trong Cài Đặt.');
@@ -100,7 +144,11 @@ export const authService = {
       const formatted: User[] = (data || []).map(rowToUser);
       return { data: formatted, error: null };
     } catch (err: any) {
-      console.error('authService.fetchProfiles error:', err);
+      if (err?.code !== '42501') {
+        console.error('authService.fetchProfiles error:', err);
+      } else {
+        console.warn('authService.fetchProfiles (permission denied or unauthenticated):', err.message);
+      }
       return { data: null, error: err };
     }
   },

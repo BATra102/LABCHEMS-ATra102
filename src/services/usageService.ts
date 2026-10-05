@@ -165,7 +165,11 @@ export const usageService = {
       const transactions = (data || []).map(rowToUsageTransaction);
       return { data: transactions, error: null };
     } catch (err: any) {
-      console.error('usageService.fetchUsageTransactions error:', err);
+      if (err?.code !== '42501') {
+        console.error('usageService.fetchUsageTransactions error:', err);
+      } else {
+        console.warn('usageService.fetchUsageTransactions (permission denied or unauthenticated):', err.message);
+      }
       return { data: null, error: err };
     }
   },

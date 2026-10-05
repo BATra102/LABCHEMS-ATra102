@@ -54,10 +54,41 @@ export const getSupabaseConfig = () => {
   };
 };
 
+// Storage adapter cho Supabase Auth hỗ trợ "Ghi nhớ đăng nhập trên thiết bị này"
+export const authStorageAdapter = {
+  getItem: (key: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    const isRemembered = localStorage.getItem('labchem_remember_me') !== 'false';
+    const sessionVal = sessionStorage.getItem(key);
+    if (sessionVal) return sessionVal;
+    if (isRemembered) {
+      return localStorage.getItem(key);
+    }
+    return null;
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    const isRemembered = localStorage.getItem('labchem_remember_me') !== 'false';
+    if (isRemembered) {
+      localStorage.setItem(key, value);
+      sessionStorage.removeItem(key);
+    } else {
+      sessionStorage.setItem(key, value);
+      localStorage.removeItem(key);
+    }
+  },
+  removeItem: (key: string): void => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  },
+};
+
 // Helper to build a client instance
 const createClientInstance = (url: string, key: string): SupabaseClient => {
   return createClient(url, key, {
     auth: {
+      storage: authStorageAdapter,
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,

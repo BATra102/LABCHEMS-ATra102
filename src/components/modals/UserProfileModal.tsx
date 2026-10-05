@@ -20,10 +20,11 @@ import {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onOpenLogin: () => void;
+  onOpenLogin?: () => void;
+  onSignOut?: () => void;
 }
 
-export const UserProfileModal: React.FC<Props> = ({ isOpen, onClose, onOpenLogin }) => {
+export const UserProfileModal: React.FC<Props> = ({ isOpen, onClose, onOpenLogin, onSignOut }) => {
   const { currentUser, isManager, transactions } = useLab();
 
   // Compute today's usage statistics for this user
@@ -199,12 +200,16 @@ export const UserProfileModal: React.FC<Props> = ({ isOpen, onClose, onOpenLogin
           <button
             onClick={() => {
               onClose();
-              onOpenLogin();
+              if (onSignOut) {
+                onSignOut();
+              } else if (onOpenLogin) {
+                onOpenLogin();
+              }
             }}
             className="flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Đăng Xuất / Đổi Tài Khoản</span>
+            <span>Đăng Xuất</span>
           </button>
 
           <button

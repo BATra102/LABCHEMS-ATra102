@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLab, DEFAULT_MANAGER_EMAIL } from '../../context/LabContext';
 import { User, UserRole } from '../../types';
 import { authService } from '../../services/authService';
-import { isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { getRoleDisplayName, isSeniorManagerUser, isSeniorManagerEmail } from '../../utils/roleUtils';
 import {
   X,
@@ -19,6 +19,9 @@ import {
   Clock,
   Sparkles,
   Zap,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 
 interface Props {
@@ -49,7 +52,12 @@ const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' })
 
 export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { users, currentUser, setCurrentUser, signInWithGoogle, isManager } = useLab();
-  const [tab, setTab] = useState<'google' | 'switch'>('google');
+  const [tab, setTab] = useState<'password' | 'google' | 'switch'>('password');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(false);
+
   const [customEmail, setCustomEmail] = useState('');
   const [customName, setCustomName] = useState('');
 
@@ -59,12 +67,103 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail.trim()) {
+      setErrorMessage('Vui lòng nhập Email.');
+      return;
+    }
+    if (!loginPassword) {
+      setErrorMessage('Vui lòng nhập Mật khẩu.');
+      return;
+    }
+
+    setIsLoadingAuth(true);
+    setErrorMessage(null);
+
+    try {
+      if (isSupabaseConfigured()) {
+        const { data, error } = await authService.signInWithPassword(loginEmail.trim(), loginPassword);
+        if (error) {
+          // If error is invalid credentials
+          if (error.message?.includes('Invalid login credentials')) {
+            throw new Error('Email hoặc mật khẩu không đúng. Vui lòng kiểm tra lại.');
+          }
+          throw error;
+        }
+        if (data?.user) {
+          const isSenior = isSeniorManagerEmail(loginEmail.trim());
+          const { data: dbProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (dbProfile && !isSenior) {
+            if (dbProfile.status === 'PENDING') {
+              setErrorMessage('Tài khoản của bạn chưa được cấp quyền truy cập (Đang chờ Người quản lý phê duyệt).');
+              return;
+            }
+            if (dbProfile.status === 'DEACTIVATED' || dbProfile.status === 'SUSPENDED') {
+              setErrorMessage('Tài khoản của bạn đã bị khóa hoặc ngừng hoạt động. Vui lòng liên hệ Người quản lý.');
+              return;
+            }
+            if (dbProfile.status !== 'ACTIVE') {
+              setErrorMessage('Tài khoản của bạn chưa được cấp quyền truy cập vào hệ thống.');
+              return;
+            }
+          }
+
+          setMessage('Đăng nhập thành công!');
+          setTimeout(() => {
+            setMessage(null);
+            onClose();
+          }, 800);
+          return;
+        }
+      }
+
+      // Local / Offline fallback match
+      const matched = users.find(
+        (u) => u.email.toLowerCase() === loginEmail.trim().toLowerCase()
+      );
+      if (matched) {
+        if (matched.status === 'DEACTIVATED' || matched.status === 'SUSPENDED') {
+          setErrorMessage('Tài khoản này đã bị khóa hoặc ngưng hoạt động. Vui lòng liên hệ Người quản lý.');
+          return;
+        }
+        setCurrentUser(matched);
+        setMessage(`Đăng nhập thành công! Xin chào ${matched.name}.`);
+        setTimeout(() => {
+          setMessage(null);
+          onClose();
+        }, 800);
+      } else {
+        const res = signInWithGoogle(loginEmail.trim());
+        if (res.success && res.user) {
+          setMessage(res.message);
+          setTimeout(() => {
+            setMessage(null);
+            onClose();
+          }, 800);
+        } else {
+          setErrorMessage(res.message || 'Email hoặc mật khẩu không đúng.');
+        }
+      }
+    } catch (err: any) {
+      console.warn('Password login error:', err);
+      setErrorMessage(err.message || 'Đăng nhập không thành công.');
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
   const handleGoogleAuth = (email: string, name?: string) => {
     const res = signInWithGoogle(email, name);
     if (res.success && res.user) {
       if (res.isPending) {
         setIsPendingNotice(true);
-        setMessage('Your account is waiting for manager approval (Tài khoản của bạn đang chờ Quản lý phê duyệt).');
+        setMessage('Tài khoản của bạn đang chờ Người quản lý phê duyệt.');
         setErrorMessage(null);
         setTimeout(() => {
           onClose();
@@ -86,7 +185,7 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleCustomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customEmail.trim()) {
-      setErrorMessage('Vui lòng nhập địa chỉ Google Email.');
+      setErrorMessage('Vui lòng nhập địa chỉ Email.');
       return;
     }
     let emailToUse = customEmail.trim();
@@ -102,12 +201,12 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/80">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center shadow-xs">
-              <GoogleIcon className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shadow-xs font-bold text-xs">
+              LC
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Đăng Nhập Bằng Google / Gmail</h2>
-              <p className="text-xs text-slate-500">Sign in with Google OAuth · Tự động đồng bộ quyền hạn</p>
+              <h2 className="text-base font-bold text-slate-900">LABCHEM</h2>
+              <p className="text-xs text-slate-500">Quản lý hóa chất phòng thí nghiệm</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
@@ -117,6 +216,21 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
         {/* Tab switch */}
         <div className="flex border-b border-slate-200 bg-slate-100/60 p-1.5 text-xs gap-1">
+          <button
+            onClick={() => {
+              setTab('password');
+              setErrorMessage(null);
+            }}
+            className={`flex-1 py-2 font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              tab === 'password'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <KeyRound className="w-3.5 h-3.5 text-purple-600" />
+            <span>Email & Mật khẩu</span>
+          </button>
+
           <button
             onClick={() => {
               setTab('google');
@@ -129,7 +243,7 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
             }`}
           >
             <GoogleIcon className="w-3.5 h-3.5" />
-            <span>Sign in with Google</span>
+            <span>Google OAuth</span>
           </button>
 
           <button
@@ -144,7 +258,7 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
             }`}
           >
             <UserIcon className="w-3.5 h-3.5" />
-            <span>Tất Cả Thành Viên ({users.length})</span>
+            <span>Tài khoản ({users.length})</span>
           </button>
         </div>
 
@@ -174,7 +288,78 @@ export const LoginModal: React.FC<Props> = ({ isOpen, onClose }) => {
         )}
 
         <div className="p-6">
-          {tab === 'google' ? (
+          {tab === 'password' ? (
+            /* TAB: EMAIL & MẬT KHẨU */
+            <form onSubmit={handlePasswordLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Email đăng nhập
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="email@example.com"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Mật khẩu
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="••••••••"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full pl-9 pr-10 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                    title={showPassword ? 'Ẩn mật khẩu' : 'Hiển thị mật khẩu'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={showPassword}
+                    onChange={(e) => setShowPassword(e.target.checked)}
+                    className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <span>Hiển thị mật khẩu</span>
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoadingAuth}
+                className="w-full py-2.5 px-4 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 group cursor-pointer"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>{isLoadingAuth ? 'Đang xác thực...' : 'Đăng nhập'}</span>
+              </button>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 space-y-1">
+                <div>• Xác thực an toàn bằng Supabase Authentication.</div>
+                <div>• Người quản lý cao cấp tự động nhận toàn quyền quản trị phòng thí nghiệm.</div>
+              </div>
+            </form>
+          ) : tab === 'google' ? (
             <div className="space-y-4">
               {/* Presets with verified Google OAuth profiles */}
               <div className="space-y-2">

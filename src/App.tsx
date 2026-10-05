@@ -18,7 +18,6 @@ import { RecordUsageModal } from './components/modals/RecordUsageModal';
 import { StockInModal } from './components/modals/StockInModal';
 import { AddChemicalModal } from './components/modals/AddChemicalModal';
 import { BottleDetailModal } from './components/modals/BottleDetailModal';
-import { LoginModal } from './components/modals/LoginModal';
 import { UserProfileModal } from './components/modals/UserProfileModal';
 import { EmailAlertsModal } from './components/modals/EmailAlertsModal';
 import { StockDiscrepancyModal } from './components/modals/StockDiscrepancyModal';
@@ -30,13 +29,22 @@ import { DeleteChemicalModal } from './components/modals/DeleteChemicalModal';
 import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileMenuDrawer } from './components/modals/MobileMenuDrawer';
-import { Bottle, Chemical } from './types';
+import { Login } from './components/Login';
+import { Bottle, Chemical, User } from './types';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { rowToUser } from './services/authService';
+import { auditService } from './services/auditService';
+import { isSeniorManagerEmail } from './utils/roleUtils';
 
 function MainApp() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
 
+  // Trạng thái xác thực đăng nhập
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+
   // Modal states
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [recordUsageOpen, setRecordUsageOpen] = useState(false);
   const [selectedChemForUsage, setSelectedChemForUsage] = useState<string | undefined>();
   const [selectedBottleForUsage, setSelectedBottleForUsage] = useState<string | undefined>();
@@ -53,7 +61,7 @@ function MainApp() {
   const [userGuideOpen, setUserGuideOpen] = useState(false);
   const [supabaseConfigOpen, setSupabaseConfigOpen] = useState(false);
 
-  // QR Gateway & Archive Center states (Mục 1 & Mục 2)
+  // QR Gateway & Archive Center states
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [archiveCenterOpen, setArchiveCenterOpen] = useState(false);
   const [chemicalToDelete, setChemicalToDelete] = useState<Chemical | null>(null);
@@ -70,6 +78,224 @@ function MainApp() {
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState<string | undefined>();
   const [expiryInitialFilter, setExpiryInitialFilter] = useState<string | undefined>();
 
+  const { bottles, isManager, currentUser, setCurrentUser, users, refreshFromSupabase } = useLab();
+
+  // Kiểm tra phiên đăng nhập & quyền truy cập khi ứng dụng khởi chạy
+  useEffect(() => {
+    let isMounted = true;
+
+    const verifySession = async () => {
+      const isRemembered = localStorage.getItem('labchem_remember_me') !== 'false';
+
+      if (!isSupabaseConfigured()) {
+        // Chế độ không dùng Supabase / Offline: kiểm tra cờ xác thực lưu trữ
+        const savedAuth = isRemembered
+          ? (localStorage.getItem('labchem_v4_is_authenticated') || sessionStorage.getItem('labchem_v4_is_authenticated'))
+          : sessionStorage.getItem('labchem_v4_is_authenticated');
+        const savedUserId = isRemembered
+          ? (localStorage.getItem('labchem_v4_current_user_id') || sessionStorage.getItem('labchem_v4_current_user_id'))
+          : sessionStorage.getItem('labchem_v4_current_user_id');
+
+        if (savedAuth === 'true' && savedUserId) {
+          const found = users.find((u) => u.id === savedUserId);
+          if (!found) {
+            if (isMounted) {
+              setAuthErrorMessage('Tài khoản không còn được phép truy cập hệ thống.');
+              setIsAuthenticated(false);
+              setIsCheckingAuth(false);
+            }
+            return;
+          }
+          if (found.status === 'LOCKED' || found.status === 'DEACTIVATED' || found.status === 'SUSPENDED') {
+            if (isMounted) {
+              setAuthErrorMessage('Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Người quản lý.');
+              setIsAuthenticated(false);
+              setIsCheckingAuth(false);
+            }
+            return;
+          }
+          if (found.status === 'DELETED') {
+            if (isMounted) {
+              setAuthErrorMessage('Tài khoản không còn được phép truy cập hệ thống.');
+              setIsAuthenticated(false);
+              setIsCheckingAuth(false);
+            }
+            return;
+          }
+          if (found.status === 'ACTIVE') {
+            if (isMounted) {
+              setCurrentUser(found);
+              setIsAuthenticated(true);
+              setIsCheckingAuth(false);
+              return;
+            }
+          }
+        }
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setIsCheckingAuth(false);
+        }
+        return;
+      }
+
+      try {
+        // 1. Kiểm tra session từ Supabase Auth
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        if (sessionErr || !session?.user) {
+          if (isMounted) {
+            setIsAuthenticated(false);
+            setIsCheckingAuth(false);
+          }
+          return;
+        }
+
+        const userEmail = session.user.email?.toLowerCase().trim() || '';
+        const isSenior = isSeniorManagerEmail(userEmail);
+
+        // 2. Kiểm tra quyền truy cập và trạng thái ACTIVE trong bảng profiles
+        let { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (!profile) {
+          const { data: profileByEmail } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('google_email', userEmail)
+            .maybeSingle();
+          if (profileByEmail) {
+            profile = profileByEmail;
+          }
+        }
+
+        // Nếu không có profile
+        if (!profile) {
+          if (isSenior) {
+            const seniorUser: User = {
+              id: session.user.id,
+              name: 'Người quản lý cao cấp',
+              email: userEmail,
+              role: 'SENIOR_MANAGER',
+              status: 'ACTIVE',
+              department: 'Ban Quản Trị Hệ Thống',
+            };
+            if (isMounted) {
+              setCurrentUser(seniorUser);
+              setIsAuthenticated(true);
+              setIsCheckingAuth(false);
+            }
+            return;
+          }
+
+          // Không tìm thấy profile và không phải quản lý cao cấp -> signOut ngay lập tức
+          await auditService.logAccessDenied(
+            userEmail,
+            'Phiên đăng nhập bị hủy: Không tìm thấy hồ sơ người dùng trong bảng profiles',
+            { userId: session.user.id }
+          );
+          await supabase.auth.signOut();
+          localStorage.removeItem('labchem_v4_is_authenticated');
+          localStorage.removeItem('labchem_v4_current_user_id');
+          sessionStorage.removeItem('labchem_v4_is_authenticated');
+          sessionStorage.removeItem('labchem_v4_current_user_id');
+          if (isMounted) {
+            setAuthErrorMessage('Tài khoản không còn được phép truy cập hệ thống.');
+            setIsAuthenticated(false);
+            setIsCheckingAuth(false);
+          }
+          return;
+        }
+
+        // 4 & 5. Nếu tài khoản không ở trạng thái ACTIVE (LOCKED, DEACTIVATED, SUSPENDED, DELETED)
+        if (profile.status !== 'ACTIVE' && !isSenior) {
+          await auditService.logAccessDenied(
+            userEmail,
+            `Phiên đăng nhập bị hủy: Trạng thái tài khoản là ${profile.status}`,
+            { userId: session.user.id, status: profile.status, role: profile.role }
+          );
+          await supabase.auth.signOut();
+          localStorage.removeItem('labchem_v4_is_authenticated');
+          localStorage.removeItem('labchem_v4_current_user_id');
+          sessionStorage.removeItem('labchem_v4_is_authenticated');
+          sessionStorage.removeItem('labchem_v4_current_user_id');
+          if (isMounted) {
+            if (profile.status === 'LOCKED' || profile.status === 'DEACTIVATED' || profile.status === 'SUSPENDED') {
+              setAuthErrorMessage('Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Người quản lý.');
+            } else if (profile.status === 'DELETED') {
+              setAuthErrorMessage('Tài khoản không còn được phép truy cập hệ thống.');
+            } else if (profile.status === 'PENDING') {
+              setAuthErrorMessage('Tài khoản của bạn đang chờ Người quản lý phê duyệt và chưa được cấp quyền truy cập.');
+            } else {
+              setAuthErrorMessage('Tài khoản chưa được kích hoạt trạng thái ACTIVE để truy cập hệ thống.');
+            }
+            setIsAuthenticated(false);
+            setIsCheckingAuth(false);
+          }
+          return;
+        }
+
+        // Đã xác thực hợp lệ
+        const validUser = rowToUser(profile);
+        if (isMounted) {
+          setCurrentUser(validUser);
+          setIsAuthenticated(true);
+          setIsCheckingAuth(false);
+        }
+      } catch (err) {
+        console.error('Lỗi xác thực phiên làm việc:', err);
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setIsCheckingAuth(false);
+        }
+      }
+    };
+
+    verifySession();
+
+    // Lắng nghe sự kiện đăng xuất từ Supabase Auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        if (isMounted) {
+          setIsAuthenticated(false);
+          localStorage.removeItem('labchem_v4_is_authenticated');
+          localStorage.removeItem('labchem_v4_current_user_id');
+          sessionStorage.removeItem('labchem_v4_is_authenticated');
+          sessionStorage.removeItem('labchem_v4_current_user_id');
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription?.unsubscribe();
+    };
+  }, [users]);
+
+  // Xử lý Đăng xuất
+  const handleSignOut = async () => {
+    try {
+      // Ghi nhận nhật ký ĐĂNG XUẤT (LOGOUT)
+      if (currentUser) {
+        await auditService.logLogout(currentUser, { trigger: 'MANUAL_USER_SIGNOUT' });
+      }
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn('Lỗi khi đăng xuất:', err);
+    }
+    localStorage.removeItem('labchem_v4_is_authenticated');
+    localStorage.removeItem('labchem_v4_current_user_id');
+    sessionStorage.removeItem('labchem_v4_is_authenticated');
+    sessionStorage.removeItem('labchem_v4_current_user_id');
+    localStorage.setItem('labchem_remember_me', 'false');
+    setIsAuthenticated(false);
+    setActiveTab('dashboard');
+    setAuthErrorMessage(null);
+  };
+
   const handleNavigateWithFilter = (tab: TabType, filter?: string) => {
     if (tab === 'inventory') {
       setInventoryInitialFilter(filter);
@@ -79,14 +305,63 @@ function MainApp() {
     setActiveTab(tab);
   };
 
-  const { bottles, isManager, currentUser, refreshFromSupabase } = useLab();
-
-  // Guard against non-managers accessing restricted tabs (Mục 1 & Mục 3)
+  // Guard against non-managers accessing restricted tabs
   useEffect(() => {
     if (!isManager && (activeTab === 'users' || activeTab === 'settings' || activeTab === 'purchase' || activeTab === 'expiry')) {
+      if (currentUser?.email) {
+        auditService.logAccessDenied(
+          currentUser.email,
+          `Từ chối truy cập tab quản trị "${activeTab}" do không có vai trò MANAGER`,
+          { attemptedTab: activeTab, currentRole: currentUser.role },
+          currentUser
+        );
+      }
       setActiveTab('dashboard');
     }
-  }, [isManager, activeTab]);
+  }, [isManager, activeTab, currentUser]);
+
+  // Bảo vệ toàn bộ URL routes (/dashboard, /chemicals, /bottles, /history, /purchase, /expiry, /users, /settings, /audit, /import-export)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if (!isAuthenticated) {
+      if (window.location.pathname !== '/login') {
+        window.history.replaceState(null, '', '/login');
+      }
+    } else {
+      const currentPath = window.location.pathname.toLowerCase().replace(/^\//, '');
+      const routeToTabMap: Record<string, TabType> = {
+        dashboard: 'dashboard',
+        chemicals: 'inventory',
+        inventory: 'inventory',
+        bottles: 'inventory',
+        history: 'usage',
+        usage: 'usage',
+        purchase: 'purchase',
+        expiry: 'expiry',
+        users: 'users',
+        settings: 'settings',
+        audit: 'settings',
+        'import-export': 'inventory',
+      };
+
+      if (currentPath && routeToTabMap[currentPath]) {
+        const targetTab = routeToTabMap[currentPath];
+        if (targetTab === 'users' || targetTab === 'settings' || targetTab === 'purchase' || targetTab === 'expiry') {
+          if (isManager) {
+            setActiveTab(targetTab);
+          } else {
+            setActiveTab('dashboard');
+            window.history.replaceState(null, '', '/dashboard');
+          }
+        } else {
+          setActiveTab(targetTab);
+        }
+      } else {
+        window.history.replaceState(null, '', `/${activeTab}`);
+      }
+    }
+  }, [isAuthenticated, activeTab, isManager]);
 
   // Handlers
   const handleOpenRecordUsage = (chemicalId?: string, bottleId?: string) => {
@@ -140,6 +415,50 @@ function MainApp() {
     setActiveTab('inventory');
   };
 
+  // 1. Màn hình chờ khi đang kiểm tra / khôi phục phiên làm việc
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-purple-600 text-white font-black text-xl flex items-center justify-center shadow-md animate-pulse tracking-wider">
+            LC
+          </div>
+          <div className="text-xs font-semibold text-slate-500">Đang khôi phục phiên đăng nhập...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Khi CHƯA XÁC THỰC: Chỉ hiển thị trang Login mới làm trang mặc định
+  // Tuyệt đối không cho phép truy cập Dashboard hoặc bất kỳ dữ liệu nào
+  if (!isAuthenticated) {
+    return (
+      <Login
+        onSuccess={(user, rememberMe) => {
+          setCurrentUser(user);
+          setIsAuthenticated(true);
+          setAuthErrorMessage(null);
+          if (rememberMe) {
+            localStorage.setItem('labchem_remember_me', 'true');
+            localStorage.setItem('labchem_v4_is_authenticated', 'true');
+            localStorage.setItem('labchem_v4_current_user_id', user.id);
+            sessionStorage.removeItem('labchem_v4_is_authenticated');
+            sessionStorage.removeItem('labchem_v4_current_user_id');
+          } else {
+            localStorage.setItem('labchem_remember_me', 'false');
+            localStorage.removeItem('labchem_v4_is_authenticated');
+            localStorage.removeItem('labchem_v4_current_user_id');
+            sessionStorage.setItem('labchem_v4_is_authenticated', 'true');
+            sessionStorage.setItem('labchem_v4_current_user_id', user.id);
+          }
+          setActiveTab('dashboard');
+        }}
+        initialErrorMessage={authErrorMessage}
+      />
+    );
+  }
+
+  // 3. Khi ĐÃ XÁC THỰC: Hiển thị giao diện hệ thống LabChem
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       {/* Top Navigation */}
@@ -149,7 +468,7 @@ function MainApp() {
         onOpenRecordUsage={() => handleOpenRecordUsage()}
         onOpenStockIn={() => handleOpenStockIn()}
         onOpenAddChemical={() => setAddChemicalOpen(true)}
-        onOpenLogin={() => setLoginModalOpen(true)}
+        onSignOut={handleSignOut}
         onOpenUserProfile={() => setUserProfileOpen(true)}
         onOpenMobileMenu={() => setMobileMenuOpen(true)}
         onOpenEmailAlerts={() => setEmailAlertsOpen(true)}
@@ -161,9 +480,9 @@ function MainApp() {
         onSearchSubmit={handleSearchSubmit}
       />
 
-      {/* Main Container with Mobile Bottom Nav Padding (pb-24 md:pb-8) */}
+      {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8 overflow-x-hidden">
-        {/* Role-based Dashboard (Mục 1 & Mục 2: Manager Dashboard vs User Dashboard) */}
+        {/* Role-based Dashboard */}
         {activeTab === 'dashboard' && (
           isManager ? (
             <DashboardView
@@ -290,15 +609,10 @@ function MainApp() {
         onRecordUsage={(bottleId, chemicalId) => handleOpenRecordUsage(chemicalId, bottleId)}
       />
 
-      <LoginModal
-        isOpen={loginModalOpen}
-        onClose={() => setLoginModalOpen(false)}
-      />
-
       <UserProfileModal
         isOpen={userProfileOpen}
         onClose={() => setUserProfileOpen(false)}
-        onOpenLogin={() => setLoginModalOpen(true)}
+        onSignOut={handleSignOut}
       />
 
       <EmailAlertsModal
@@ -332,7 +646,7 @@ function MainApp() {
         }}
       />
 
-      {/* Mobile Slide-over Drawer (Hamburger menu) */}
+      {/* Mobile Slide-over Drawer */}
       <MobileMenuDrawer
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
@@ -341,12 +655,12 @@ function MainApp() {
         onOpenRecordUsage={() => handleOpenRecordUsage()}
         onOpenQrScanner={() => setQrScannerOpen(true)}
         onOpenUserProfile={() => setUserProfileOpen(true)}
-        onOpenLogin={() => setLoginModalOpen(true)}
+        onSignOut={handleSignOut}
         onOpenUserGuide={() => setUserGuideOpen(true)}
         onOpenArchiveCenter={handleOpenArchiveCenter}
       />
 
-      {/* Mobile Fixed Bottom Navigation Bar (Section 2: 🏠 Kho 📷 QR 🕘 Lịch sử) */}
+      {/* Mobile Fixed Bottom Navigation Bar */}
       <MobileBottomNav
         activeTab={activeTab}
         setActiveTab={setActiveTab}

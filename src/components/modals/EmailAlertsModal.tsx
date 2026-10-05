@@ -73,7 +73,7 @@ export const EmailAlertsModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Hệ Thống Thông Báo Email Tự Động Tới Manager
+                Hệ Thống Thông Báo Email Tự Động Tới Người Quản Lý
               </h2>
               <p className="text-xs text-slate-500">
                 Tự động gửi email cảnh báo khi hóa chất chạm ngưỡng cảnh báo hoặc mức tối thiểu

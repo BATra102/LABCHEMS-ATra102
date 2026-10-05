@@ -16,11 +16,12 @@ import {
 interface Props {
   onOpenBottleDetail: (bottle: Bottle) => void;
   onOpenRecordUsage: (chemicalId: string, bottleId: string) => void;
+  initialFilterGroup?: string;
 }
 
-export const ExpiryView: React.FC<Props> = ({ onOpenBottleDetail, onOpenRecordUsage }) => {
+export const ExpiryView: React.FC<Props> = ({ onOpenBottleDetail, onOpenRecordUsage, initialFilterGroup }) => {
   const { bottles, chemicals, referenceDate } = useLab();
-  const [filterGroup, setFilterGroup] = useState<string>('ALL');
+  const [filterGroup, setFilterGroup] = useState<string>(initialFilterGroup || 'ALL');
 
   // Enrich bottles with chemical details and expiry countdown (Mục 39: Ẩn hóa chất đã lưu trữ)
   const enrichedBottles = useMemo(() => {

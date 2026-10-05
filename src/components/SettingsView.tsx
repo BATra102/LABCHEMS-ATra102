@@ -783,7 +783,29 @@ export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter, onOpenSupab
                       {log.user}
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-800">
-                      {log.action}
+                      {log.action === 'LOGIN_SUCCESS' && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          LOGIN_SUCCESS
+                        </span>
+                      )}
+                      {log.action === 'LOGIN_FAILED' && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                          LOGIN_FAILED
+                        </span>
+                      )}
+                      {log.action === 'ACCESS_DENIED' && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          ACCESS_DENIED
+                        </span>
+                      )}
+                      {log.action === 'LOGOUT' && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                          LOGOUT
+                        </span>
+                      )}
+                      {!['LOGIN_SUCCESS', 'LOGIN_FAILED', 'ACCESS_DENIED', 'LOGOUT'].includes(log.action) && (
+                        <span>{log.action}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-mono text-[10px] text-slate-500">
                       <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
@@ -1009,9 +1031,9 @@ export const SettingsView: React.FC<Props> = ({ onOpenArchiveCenter, onOpenSupab
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (!addName.trim()) return;
-                    const res = addUser({
+                    const res = await addUser({
                       name: addName.trim(),
                       email: addEmail.trim() || `${addName.toLowerCase().replace(/\s+/g, '')}@lab.univ.edu.vn`,
                       role: addRole,

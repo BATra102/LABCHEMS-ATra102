@@ -25,10 +25,13 @@ import {
   History,
   Edit,
   Building,
+  KeyRound,
 } from 'lucide-react';
 import { UserLimitsModal } from './modals/UserLimitsModal';
 import { DeleteManagerModal } from './modals/DeleteManagerModal';
 import { EditUserModal, PRESET_DEPARTMENTS } from './modals/EditUserModal';
+import { CreateAccountModal } from './modals/CreateAccountModal';
+import { ResetPasswordModal } from './modals/ResetPasswordModal';
 import { getRoleDisplayName, isSeniorManagerUser, isSeniorManagerEmail } from '../utils/roleUtils';
 
 export const UserManagementView: React.FC = () => {
@@ -48,6 +51,7 @@ export const UserManagementView: React.FC = () => {
     deleteUser,
     deleteDeactivatedManager,
     restoreUser,
+    refreshFromSupabase,
   } = useLab();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -55,12 +59,9 @@ export const UserManagementView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | UserStatus>('ALL');
   const [departmentFilter, setDepartmentFilter] = useState<'ALL' | string>('ALL');
 
-  // Form states
-  const [isAddingUser, setIsAddingUser] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<UserRole>('USER');
-  const [newDept, setNewDept] = useState('Bộ môn Dược liệu & Chiết xuất');
+  // Cấp tài khoản mới (Chỉ Người quản lý cao cấp)
+  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
+  const [selectedUserForResetPassword, setSelectedUserForResetPassword] = useState<User | null>(null);
 
   // Editing state
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -99,10 +100,16 @@ export const UserManagementView: React.FC = () => {
   }
 
   const isDeletedTab = statusFilter === 'DELETED';
-  const pendingUsers = users.filter((u) => u.status === 'PENDING');
-  const deletedUsers = users.filter((u) => u.status === 'DELETED');
+  const isCurrentUserSenior = isSeniorManagerUser(currentUser);
+  const pendingUsers = users.filter((u) => u.status === 'PENDING' && (isCurrentUserSenior || !isSeniorManagerUser(u)));
+  const deletedUsers = users.filter((u) => u.status === 'DELETED' && (isCurrentUserSenior || !isSeniorManagerUser(u)));
 
   const filteredUsers = users.filter((u) => {
+    // Ẩn Người quản lý cao cấp đối với các tài khoản khác
+    if (!isCurrentUserSenior && isSeniorManagerUser(u)) {
+      return false;
+    }
+
     // 14. FILTER: Tài khoản DELETED mặc định KHÔNG xuất hiện trong danh sách User chính. Chỉ xuất hiện trong Lịch sử xóa.
     if (!isDeletedTab && u.status === 'DELETED') {
       return false;
@@ -128,54 +135,73 @@ export const UserManagementView: React.FC = () => {
     return true;
   });
 
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim() || !newEmail.trim()) {
-      showMsg('Vui lòng điền họ tên và email.', 'error');
-      return;
-    }
-    const res = addUser({
-      name: newName.trim(),
-      email: newEmail.trim(),
-      role: newRole,
-      department: newDept.trim(),
-      status: 'ACTIVE',
-    });
-    if (res.success) {
-      showMsg(`Đã tạo thành viên "${newName}" thành công!`);
-      setNewName('');
-      setNewEmail('');
-      setIsAddingUser(false);
-    } else {
-      showMsg(res.message, 'error');
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="p-2 bg-purple-50 text-purple-700 rounded-xl">
               <Users className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight">Quản Lý Người Dùng & Phân Quyền</h1>
+              <h1 className="text-lg font-bold text-slate-900 tracking-tight">QUẢN LÝ NGƯỜI DÙNG</h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                Duyệt thành viên Google OAuth, cấp quyền vai trò (Người quản lý / Nhân viên / Người xem), kích hoạt hoặc khóa tài khoản
+                Cấp tài khoản thành viên, đặt vai trò, phân quyền hạn mức, kích hoạt hoặc khóa tài khoản phòng Lab
               </p>
             </div>
           </div>
         </div>
 
-        <button
-          onClick={() => setIsAddingUser(!isAddingUser)}
-          className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>{isAddingUser ? 'Đóng biểu mẫu' : '+ Thêm Thành Viên Mới'}</span>
-        </button>
+        {isManager && (
+          <button
+            type="button"
+            onClick={() => setIsProvisionModalOpen(true)}
+            className="px-4 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl transition-all flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Cấp tài khoản</span>
+          </button>
+        )}
+      </div>
+
+      {/* Summary Cards: Tổng tài khoản, ACTIVE, LOCKED */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Tổng tài khoản</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">
+              {users.filter((u) => u.status !== 'DELETED').length}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
+            <Users className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">ACTIVE</p>
+            <p className="text-2xl font-black text-emerald-700 mt-1">
+              {users.filter((u) => u.status === 'ACTIVE').length}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <UserCheck className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-semibold text-rose-600 uppercase tracking-wider">LOCKED</p>
+            <p className="text-2xl font-black text-rose-700 mt-1">
+              {users.filter((u) => u.status === 'LOCKED' || u.status === 'DEACTIVATED' || u.status === 'SUSPENDED').length}
+            </p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+            <Lock className="w-5 h-5" />
+          </div>
+        </div>
       </div>
 
       {notificationMsg && (
@@ -254,79 +280,6 @@ export const UserManagementView: React.FC = () => {
             ))}
           </div>
         </div>
-      )}
-
-      {/* Add User Modal / Form */}
-      {isAddingUser && (
-        <form onSubmit={handleAddSubmit} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4 animate-in fade-in">
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-            <UserPlus className="w-4 h-4 text-purple-600" />
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Thêm Thành Viên Mới Vào Lab</h3>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Họ và tên *</label>
-              <input
-                type="text"
-                required
-                placeholder="vd: Trần Văn Bình"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Google Email *</label>
-              <input
-                type="email"
-                required
-                placeholder="user@gmail.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Vai trò cấp quyền (Role)</label>
-              <select
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value as UserRole)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium"
-              >
-                <option value="USER">Thành viên (USER - Ghi xuất dùng)</option>
-                <option value="STAFF">Nhân viên (STAFF - Nhập kho, xuất dùng, kiểm tra)</option>
-                <option value="VIEWER">Người xem (VIEWER - Chỉ xem, không chỉnh sửa)</option>
-                <option value="MANAGER">Người quản lý (MANAGER - Toàn quyền quản trị)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Bộ môn / Đơn vị</label>
-              <input
-                type="text"
-                value={newDept}
-                onChange={(e) => setNewDept(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setIsAddingUser(false)}
-              className="px-3.5 py-1.5 text-xs text-slate-600 hover:text-slate-800"
-            >
-              Hủy
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-purple-700 hover:bg-purple-800 rounded-lg shadow-xs cursor-pointer"
-            >
-              Lưu & Kích Hoạt Thành Viên
-            </button>
-          </div>
-        </form>
       )}
 
       {/* Table: User Management Matrix (Section 41) */}
@@ -567,12 +520,12 @@ export const UserManagementView: React.FC = () => {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                   <th className="py-3 px-4">THÀNH VIÊN</th>
-                  <th className="py-3 px-4">EMAIL GOOGLE</th>
+                  <th className="py-3 px-4">EMAIL ĐĂNG NHẬP</th>
                   <th className="py-3 px-4">VAI TRÒ</th>
                   <th className="py-3 px-4">BỘ MÔN</th>
                   <th className="py-3 px-4">ĐỊNH MỨC & HẠN CHẾ</th>
                   <th className="py-3 px-4">TRẠNG THÁI</th>
-                  <th className="py-3 px-4">LẦN ĐĂNG NHẬP</th>
+                  <th className="py-3 px-4">NGÀY TẠO / ĐĂNG NHẬP</th>
                   <th className="py-3 px-4 text-right">THAO TÁC</th>
                 </tr>
               </thead>
@@ -729,6 +682,18 @@ export const UserManagementView: React.FC = () => {
                         {/* THAO TÁC */}
                         <td className="py-3 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* [ Đổi MK ] - Chỉ Người quản lý cao cấp */}
+                            {isCurrentUserSenior && !isCurrent && (
+                              <button
+                                onClick={() => setSelectedUserForResetPassword(u)}
+                                className="px-2 py-1 text-[11px] font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 cursor-pointer inline-flex items-center gap-1 shadow-2xs transition-colors"
+                                title="Đặt lại mật khẩu cho thành viên"
+                              >
+                                <KeyRound className="w-3 h-3 text-amber-700" />
+                                <span>Đổi MK</span>
+                              </button>
+                            )}
+
                             {/* [ Chỉnh sửa ] */}
                             <button
                               onClick={() => setSelectedUserForEdit(u)}
@@ -803,7 +768,7 @@ export const UserManagementView: React.FC = () => {
                               </button>
                             )}
 
-                            {u.status === 'DEACTIVATED' && (
+                            {(u.status === 'DEACTIVATED' || u.status === 'LOCKED' || u.status === 'SUSPENDED') && (
                               <button
                                 onClick={() => {
                                   const res = activateUser(u.id);
@@ -912,6 +877,27 @@ export const UserManagementView: React.FC = () => {
         onClose={() => setSelectedUserForDeletion(null)}
         onSuccess={(msg) => {
           showMsg(`✓ Đã xóa tài khoản: ${msg}`);
+        }}
+      />
+
+      {/* Create Account Modal (Cấp tài khoản mới) */}
+      <CreateAccountModal
+        isOpen={isProvisionModalOpen}
+        onClose={() => setIsProvisionModalOpen(false)}
+        onSuccess={async (newUser) => {
+          showMsg(`✓ Đã cấp tài khoản thành công cho "${newUser.name}"!`);
+          await refreshFromSupabase();
+        }}
+      />
+
+      {/* Reset Password Modal (Đặt lại mật khẩu) */}
+      <ResetPasswordModal
+        isOpen={!!selectedUserForResetPassword}
+        user={selectedUserForResetPassword}
+        onClose={() => setSelectedUserForResetPassword(null)}
+        onSuccess={async () => {
+          showMsg('✓ Đã đặt lại mật khẩu cho thành viên thành công!');
+          await refreshFromSupabase();
         }}
       />
     </div>

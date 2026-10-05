@@ -28,7 +28,8 @@ interface Props {
   onOpenRecordUsage: () => void;
   onOpenQrScanner: () => void;
   onOpenUserProfile: () => void;
-  onOpenLogin: () => void;
+  onOpenLogin?: () => void;
+  onSignOut?: () => void;
   onOpenUserGuide?: () => void;
   onOpenArchiveCenter?: () => void;
 }
@@ -42,6 +43,7 @@ export const MobileMenuDrawer: React.FC<Props> = ({
   onOpenQrScanner,
   onOpenUserProfile,
   onOpenLogin,
+  onSignOut,
   onOpenUserGuide,
   onOpenArchiveCenter,
 }) => {
@@ -284,12 +286,16 @@ export const MobileMenuDrawer: React.FC<Props> = ({
           <button
             onClick={() => {
               onClose();
-              onOpenLogin();
+              if (onSignOut) {
+                onSignOut();
+              } else if (onOpenLogin) {
+                onOpenLogin();
+              }
             }}
             className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
-            <span>Đăng Xuất / Đổi Tài Khoản</span>
+            <span>Đăng Xuất</span>
           </button>
         </div>
       </div>

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.system_roles_whitelist (
 
 -- Pre-seed designated manager emails (Edit or add emails as needed)
 INSERT INTO public.system_roles_whitelist (email, role, notes) VALUES
-  ('jasminebee279@gmail.com', 'MANAGER', 'Chủ nhiệm / Quản lý Lab chính'),
+  ('jasminebee279@gmail.com', 'MANAGER', 'Người quản lý Lab chính'),
   ('buianhtra2021@gmail.com', 'MANAGER', 'Quản lý Lab Dược liệu & Chiết xuất')
 ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
 

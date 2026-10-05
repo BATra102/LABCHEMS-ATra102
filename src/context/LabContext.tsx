@@ -50,6 +50,7 @@ import { chemicalService, rowToChemical } from '../services/chemicalService';
 import { bottleService, rowToBottle } from '../services/bottleService';
 import { usageService, rowToUsageTransaction } from '../services/usageService';
 import { authService, rowToUser } from '../services/authService';
+import { userService } from '../services/userService';
 import { auditService } from '../services/auditService';
 import { alertEmailService, StockAlertLog } from '../services/alertEmailService';
 import {
@@ -104,7 +105,7 @@ interface LabContextType {
   deactivateUser: (userId: string) => { success: boolean; message: string };
   activateUser: (userId: string) => { success: boolean; message: string };
   changeUserRole: (userId: string, newRole: UserRole) => { success: boolean; message: string };
-  addUser: (userData: Omit<User, 'id'>) => { success: boolean; message: string; user?: User };
+  addUser: (userData: Omit<User, 'id'> & { password?: string }) => Promise<{ success: boolean; message: string; user?: User }> | { success: boolean; message: string; user?: User };
   updateUser: (id: string, update: Partial<User>) => { success: boolean; message: string };
   changeUserDepartment: (userId: string, newDepartment: string) => { success: boolean; message: string };
   canManageTargetUser: (target: User) => { allowed: boolean; message: string };
@@ -639,6 +640,22 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(false);
       return;
     }
+
+    // Chỉ thực hiện tải dữ liệu kho & kiểm toán khi đã có phiên xác thực người dùng.
+    // Nếu chưa đăng nhập (vai trò vô danh 'anon'), không gửi các truy vấn nội bộ để tránh lỗi 42501 permission denied.
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session?.user) {
+        setIsSyncing(false);
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      setIsSyncing(false);
+      setIsLoading(false);
+      return;
+    }
+
     setIsSyncing(true);
     setLoadError(null);
     try {
@@ -680,7 +697,14 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    refreshFromSupabase();
+    // Kiểm tra session hiện có khi khởi động
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        refreshFromSupabase();
+      } else {
+        setIsLoading(false);
+      }
+    });
 
     // Supabase Auth session synchronization
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -696,6 +720,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setCurrentUser(userObj);
           }
         } catch (_) {}
+        // Tự động tải lại dữ liệu khi người dùng đăng nhập thành công
+        refreshFromSupabase();
       }
     });
 
@@ -1300,10 +1326,14 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     };
   };
 
-  const signOut = () => {
-    // Revert to demo manager for convenience, or clear
-    const manager = users.find((u) => u.role === 'MANAGER' && u.status === 'ACTIVE') || DEMO_USERS[0];
-    setCurrentUser(manager);
+  const signOut = async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      console.warn('Supabase signOut notice:', e);
+    }
     logAudit('ĐĂNG XUẤT', 'USER', currentUser.id, `${currentUser.name} đã đăng xuất phiên làm việc.`);
   };
 
@@ -1421,10 +1451,24 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       }
     }
 
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'DEACTIVATED' as UserStatus } : u)));
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'LOCKED' as UserStatus } : u)));
     if (currentUser.id === userId) {
-      setCurrentUser((prev) => ({ ...prev, status: 'DEACTIVATED' }));
+      setCurrentUser((prev) => ({ ...prev, status: 'LOCKED' }));
     }
+
+    if (isSupabaseConfigured()) {
+      userService.changeStatus(userId, 'LOCKED', currentUser.email).catch(() => {});
+    }
+
+    auditService.log({
+      action: 'ACCOUNT_LOCKED',
+      entityType: 'USER',
+      entityId: userId,
+      description: `Khóa tài khoản: ${target.name} (${target.email})`,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      newData: { status: 'LOCKED' },
+    });
 
     logAudit(
       'KHÓA TÀI KHOẢN',
@@ -1455,6 +1499,20 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       setCurrentUser((prev) => ({ ...prev, status: 'ACTIVE' }));
     }
 
+    if (isSupabaseConfigured()) {
+      userService.changeStatus(userId, 'ACTIVE', currentUser.email).catch(() => {});
+    }
+
+    auditService.log({
+      action: 'ACCOUNT_UNLOCKED',
+      entityType: 'USER',
+      entityId: userId,
+      description: `Mở khóa tài khoản: ${target.name} (${target.email})`,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      newData: { status: 'ACTIVE' },
+    });
+
     logAudit(
       'MỞ KHÓA TÀI KHOẢN',
       'USER',
@@ -1478,9 +1536,9 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
     // Section 59: Prevent demoting the last manager
     if (target.role === 'MANAGER' && newRole === 'USER') {
-      const otherActiveManagers = users.filter((u) => u.role === 'MANAGER' && u.status === 'ACTIVE' && u.id !== userId);
-      if (otherActiveManagers.length === 0) {
-        return { success: false, message: 'Không thể hạ quyền Quản lý duy nhất đang hoạt động của hệ thống!' };
+      const activeManagers = users.filter((u) => u.role === 'MANAGER' && u.id !== userId);
+      if (activeManagers.length === 0) {
+        return { success: false, message: 'Quy định an toàn: Không thể hạ quyền Quản lý (MANAGER) duy nhất còn lại của hệ thống.' };
       }
     }
 
@@ -1489,11 +1547,26 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       setCurrentUser((prev) => ({ ...prev, role: newRole }));
     }
 
+    if (isSupabaseConfigured()) {
+      userService.updateUser(userId, { role: newRole }, currentUser).catch(() => {});
+    }
+
+    auditService.log({
+      action: 'ACCOUNT_ROLE_CHANGED',
+      entityType: 'USER',
+      entityId: userId,
+      description: `Đổi vai trò người dùng ${target.name} từ ${target.role} sang ${newRole}`,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      oldData: { role: target.role },
+      newData: { role: newRole },
+    });
+
     logAudit('CHANGE ROLE', 'USER', userId, `${currentUser.name} đã đổi vai trò của ${target.name}: ${target.role} → ${newRole}`);
     return { success: true, message: `Đã đổi vai trò của ${target.name} thành ${newRole}.` };
   };
 
-  const addUser = (userData: Omit<User, 'id'>) => {
+  const addUser = async (userData: Omit<User, 'id'> & { password?: string }) => {
     if (!canManageUsers) {
       return { success: false, message: 'ACCESS DENIED: 403 Forbidden. Chỉ Quản lý (MANAGER) mới có quyền thêm thành viên mới.' };
     }
@@ -1509,6 +1582,26 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     };
     setUsers((prev) => [...prev, newUser]);
     logAudit('Thêm người dùng', 'USER', newId, `${currentUser.name} đã thêm thành viên: ${newUser.name} (${newUser.role}, ${newUser.department})`);
+
+    // Đồng bộ vào Supabase Auth và bảng profiles
+    if (isSupabaseConfigured()) {
+      try {
+        await userService.createUser({
+          email: newUser.email,
+          password: userData.password,
+          name: newUser.name,
+          role: newUser.role,
+          department: newUser.department,
+          position: newUser.position,
+          phone: newUser.phone,
+          member_code: newUser.member_code,
+          status: newUser.status,
+        });
+      } catch (err: any) {
+        console.warn('userService.createUser error:', err);
+      }
+    }
+
     return { success: true, message: `Đã thêm thành viên "${newUser.name}".`, user: newUser };
   };
 
