@@ -466,43 +466,60 @@ export const Header: React.FC<Props> = ({
 
           {/* Zone 4: Action Buttons, Notification Center, User Profile */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Supabase Cloud & Realtime Status Badge */}
-            {onOpenSupabaseConfig && (
+            {/* Cloud Database Status Badge (Section 9 & 11) */}
+            {isManager && onOpenSupabaseConfig ? (
               <button
                 onClick={onOpenSupabaseConfig}
-                className={`flex items-center gap-1 sm:gap-1.5 px-2 py-1.5 sm:px-2.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer shrink-0 ${
+                className={`flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer shrink-0 ${
                   isSupabaseConfigured
-                    ? isRealtimeActive
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                      : 'bg-teal-50 text-teal-800 border-teal-300 hover:bg-teal-100'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                     : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
                 }`}
                 title={
                   isSupabaseConfigured
-                    ? isRealtimeActive
-                      ? 'Supabase Cloud Realtime đang hoạt động đồng bộ trực tiếp!'
-                      : 'Supabase Cloud đã cấu hình (đang kết nối kênh Realtime)'
-                    : 'Bấm để cấu hình kết nối Supabase Cloud Database'
+                    ? 'Cloud Database: Đã kết nối (Bấm để xem cấu hình hệ thống)'
+                    : 'Cloud Database: Đang kiểm tra kết nối...'
                 }
               >
                 <span
                   className={`w-2 h-2 rounded-full shrink-0 ${
                     isSupabaseConfigured
-                      ? isRealtimeActive
-                        ? 'bg-emerald-500 animate-pulse'
-                        : 'bg-teal-500'
+                      ? 'bg-emerald-500 animate-pulse'
                       : 'bg-amber-500'
                   }`}
                 />
                 <Database className="w-3.5 h-3.5 text-slate-700 shrink-0" />
                 <span className="hidden xl:inline">
-                  {isSupabaseConfigured
-                    ? isRealtimeActive
-                      ? 'Realtime'
-                      : 'Cloud'
-                    : 'Supabase'}
+                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kiểm tra...'}
+                </span>
+                <span className="inline xl:hidden">
+                  {isSupabaseConfigured ? 'Cloud DB' : 'Đang kết nối'}
                 </span>
               </button>
+            ) : (
+              <div
+                className={`flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 rounded-xl border text-[11px] font-semibold shrink-0 ${
+                  isSupabaseConfigured
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-50 text-amber-800 border-amber-300'
+                }`}
+                title="Trạng thái kết nối Cloud Database"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    isSupabaseConfigured
+                      ? 'bg-emerald-500'
+                      : 'bg-amber-500'
+                  }`}
+                />
+                <Database className="w-3.5 h-3.5 text-slate-700 shrink-0" />
+                <span className="hidden xl:inline">
+                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kiểm tra...'}
+                </span>
+                <span className="inline xl:hidden">
+                  {isSupabaseConfigured ? 'Cloud DB' : 'Đang kết nối'}
+                </span>
+              </div>
             )}
 
             {/* NOTIFICATION CENTER BELL (Section 60 & Email Alerts) */}

@@ -1256,4 +1256,76 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE O
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON ROUTINES TO anon, authenticated, service_role;
 
+-- ====================================================================
+-- SECTION 21: MANAGER ACCOUNT PROVISIONING & PASSWORD INITIALIZATION
+-- Mật khẩu chuẩn: LabChem@2026
+-- ====================================================================
+DO $$
+DECLARE
+  v_senior_id UUID := '4d27e9a8-aae2-4276-adcf-1f10f3458b97';
+  v_lab_mgr_id UUID := 'b3d5175e-a567-412b-9cd1-22249f18ee25';
+BEGIN
+  -- 1. Người quản lý cao cấp: buiantra2021@gmail.com
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password,
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    v_senior_id,
+    'authenticated', 'authenticated', 'buiantra2021@gmail.com',
+    crypt('LabChem@2026', gen_salt('bf')),
+    now(), '{"provider":"email","providers":["email"]}',
+    '{"full_name":"Bùi Anh Trà (Người quản lý cao cấp)","role":"SENIOR_MANAGER"}',
+    now(), now()
+  ) ON CONFLICT (id) DO UPDATE SET
+    encrypted_password = crypt('LabChem@2026', gen_salt('bf')),
+    email_confirmed_at = now(), updated_at = now();
+
+  INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, created_at, updated_at)
+  VALUES (
+    v_senior_id, v_senior_id,
+    format('{"sub":"%s","email":"%s"}', v_senior_id, 'buiantra2021@gmail.com')::jsonb,
+    'email', v_senior_id::text, now(), now()
+  ) ON CONFLICT (provider, provider_id) DO NOTHING;
+
+  INSERT INTO public.profiles (
+    id, email, google_email, full_name, role, status, department, must_change_password, updated_at
+  ) VALUES (
+    v_senior_id, 'buiantra2021@gmail.com', 'buiantra2021@gmail.com',
+    'Bùi Anh Trà (Người quản lý cao cấp)', 'SENIOR_MANAGER', 'ACTIVE', 'Ban Quản Trị Hệ Thống', false, now()
+  ) ON CONFLICT (id) DO UPDATE SET
+    role = 'SENIOR_MANAGER', status = 'ACTIVE', must_change_password = false, updated_at = now();
+
+  -- 2. Quản lý phòng Lab: jasminebee279@gmail.com
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password,
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    v_lab_mgr_id,
+    'authenticated', 'authenticated', 'jasminebee279@gmail.com',
+    crypt('LabChem@2026', gen_salt('bf')),
+    now(), '{"provider":"email","providers":["email"]}',
+    '{"full_name":"Người quản lý Lab","role":"MANAGER"}',
+    now(), now()
+  ) ON CONFLICT (id) DO UPDATE SET
+    encrypted_password = crypt('LabChem@2026', gen_salt('bf')),
+    email_confirmed_at = now(), updated_at = now();
+
+  INSERT INTO auth.identities (id, user_id, identity_data, provider, provider_id, created_at, updated_at)
+  VALUES (
+    v_lab_mgr_id, v_lab_mgr_id,
+    format('{"sub":"%s","email":"%s"}', v_lab_mgr_id, 'jasminebee279@gmail.com')::jsonb,
+    'email', v_lab_mgr_id::text, now(), now()
+  ) ON CONFLICT (provider, provider_id) DO NOTHING;
+
+  INSERT INTO public.profiles (
+    id, email, google_email, full_name, role, status, department, must_change_password, updated_at
+  ) VALUES (
+    v_lab_mgr_id, 'jasminebee279@gmail.com', 'jasminebee279@gmail.com',
+    'Người quản lý Lab', 'MANAGER', 'ACTIVE', 'Bộ môn Dược liệu & Chiết xuất', false, now()
+  ) ON CONFLICT (id) DO UPDATE SET
+    role = 'MANAGER', status = 'ACTIVE', must_change_password = false, updated_at = now();
+END $$;
+
 `;

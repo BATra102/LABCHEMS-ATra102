@@ -124,7 +124,7 @@ export const bottleService = {
     }
 
     try {
-      const payload = {
+      const payload: any = {
         chemical_id: bottle.chemicalId,
         bottle_code: bottle.bottleCode,
         qr_code: bottle.qrId || bottle.bottleCode,
@@ -139,6 +139,10 @@ export const bottleService = {
         cabinet_shelf: bottle.location?.shelf || 'Shelf 1',
         status: bottle.status === 'FULL' ? 'SEALED' : bottle.status,
       };
+
+      if ((bottle as any).id) {
+        payload.id = (bottle as any).id;
+      }
 
       const { data, error } = await supabase
         .from('bottles')

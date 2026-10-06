@@ -114,7 +114,7 @@ export const chemicalService = {
     }
 
     try {
-      const payload = {
+      const payload: any = {
         name: chemical.name,
         cas_number: chemical.casNumber,
         category: chemical.category,
@@ -133,6 +133,10 @@ export const chemicalService = {
         sds_url: chemical.safetyInfo?.sdsUrl || null,
         status: chemical.status || 'ACTIVE',
       };
+
+      if ((chemical as any).id) {
+        payload.id = (chemical as any).id;
+      }
 
       const { data, error } = await supabase
         .from('chemicals')

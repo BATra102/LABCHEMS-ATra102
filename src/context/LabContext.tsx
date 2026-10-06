@@ -366,68 +366,16 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const pendingUsersCount = useMemo(() => visibleUsers.filter((u) => u.status === 'PENDING').length, [visibleUsers]);
 
-  // Persist users & active user
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_users`, JSON.stringify(users));
-  }, [users]);
+  // Không lưu users vào localStorage làm database phụ (Mục 7)
 
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_current_user_id`, currentUser.id);
-  }, [currentUser]);
+  // 3. Chemicals & Bottles state (Nguồn dữ liệu duy nhất từ Supabase Cloud Database)
+  const [chemicals, setChemicals] = useState<Chemical[]>([]);
 
-  // 3. Chemicals & Bottles state (CLEAN PRODUCTION: Default to empty array [])
-  const [chemicals, setChemicals] = useState<Chemical[]>(() => {
-    if (isSupabaseConfigured()) {
-      return [];
-    }
-    const saved = localStorage.getItem(`${STORAGE_KEY}_chemicals`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) { console.error(e); }
-    }
-    return [];
-  });
+  const [bottles, setBottles] = useState<Bottle[]>([]);
 
-  const [bottles, setBottles] = useState<Bottle[]>(() => {
-    if (isSupabaseConfigured()) {
-      return [];
-    }
-    const saved = localStorage.getItem(`${STORAGE_KEY}_bottles`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) { console.error(e); }
-    }
-    return [];
-  });
+  const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
 
-  const [transactions, setTransactions] = useState<InventoryTransaction[]>(() => {
-    if (isSupabaseConfigured()) {
-      return [];
-    }
-    const saved = localStorage.getItem(`${STORAGE_KEY}_transactions`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) { console.error(e); }
-    }
-    return [];
-  });
-
-  const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_purchase`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) { console.error(e); }
-    }
-    return [];
-  });
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_audit`);
@@ -555,22 +503,16 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(`${STORAGE_KEY}_cabinets`, JSON.stringify(storageCabinets));
   }, [storageCabinets]);
 
-  // Save changes to localStorage
+  // Xóa các key localStorage database cũ theo yêu cầu Mục 7
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_chemicals`, JSON.stringify(chemicals));
-  }, [chemicals]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_bottles`, JSON.stringify(bottles));
-  }, [bottles]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_transactions`, JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_purchase`, JSON.stringify(purchaseItems));
-  }, [purchaseItems]);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`${STORAGE_KEY}_chemicals`);
+      localStorage.removeItem(`${STORAGE_KEY}_bottles`);
+      localStorage.removeItem(`${STORAGE_KEY}_transactions`);
+      localStorage.removeItem(`${STORAGE_KEY}_purchase`);
+      localStorage.removeItem(`${STORAGE_KEY}_users`);
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_audit`, JSON.stringify(auditLogs));
@@ -2502,6 +2444,9 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         };
         targetBottleId = b.id;
         targetBottleCode = b.bottleCode;
+        if (isSupabaseConfigured()) {
+          bottleService.updateQuantity(targetBottleId, newVol, newStatus).catch((err) => console.warn('Supabase updateQuantity error:', err));
+        }
       }
     } else {
       const codePrefix = chem.code
@@ -2530,7 +2475,9 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       const autoCode = candidateCode;
       const nextNum = candidateNum;
 
-      const newBottleId = `bottle-${chem.id}-${Date.now().toString(36)}`;
+      const newBottleId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `bot-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
       const newStatus = calculateBottleStatus(quantity, quantity, expiryDate, referenceDate);
 
       const newBottle: Bottle = {
@@ -3099,7 +3046,9 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền thêm danh mục hóa chất mới.' };
     }
 
-    const newId = `chem-${chemicalData.name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 15)}-${Date.now().toString(36)}`;
+    const newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `chem-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
     const newChem: Chemical = {
       ...chemicalData,
       id: newId,
@@ -3109,8 +3058,11 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
     // Initial bottle
     const initialQty = chemicalData.targetStock || chemicalData.warningStock || 1000;
+    const initialBottleId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `bot-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
     const initialBottle: Bottle = {
-      id: `bottle-${newId}-001`,
+      id: initialBottleId,
       chemicalId: newId,
       bottleCode: `${chemicalData.code ? chemicalData.code.split('-')[0] : 'BOT'}-001`,
       lotNumber: `LOT-${new Date().getFullYear()}-001`,
