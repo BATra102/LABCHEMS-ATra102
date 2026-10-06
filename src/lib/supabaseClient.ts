@@ -2,18 +2,19 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Đọc thông tin cấu hình tập trung từ biến môi trường của ứng dụng
 // Tuyệt đối không yêu cầu người dùng nhập thủ công URL hay API Key trên giao diện
-const envUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
+const envUrl =
+  (import.meta.env.VITE_SUPABASE_URL as string) ||
+  'https://hlkprapotgvtmqqnwddx.supabase.co';
 const envPublishableKey =
   (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) ||
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
-  '';
+  'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
     envUrl &&
     envPublishableKey &&
     envUrl.startsWith('https://') &&
-    !envUrl.includes('placeholder-project') &&
     envPublishableKey.length > 20
   );
 };

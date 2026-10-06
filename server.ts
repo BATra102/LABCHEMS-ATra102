@@ -47,8 +47,15 @@ async function startServer() {
         });
       }
 
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      const supabaseUrl =
+        process.env.VITE_SUPABASE_URL ||
+        process.env.SUPABASE_URL ||
+        'https://hlkprapotgvtmqqnwddx.supabase.co';
+      const supabaseAnonKey =
+        process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
       const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
       if (!supabaseUrl || !supabaseAnonKey) {
