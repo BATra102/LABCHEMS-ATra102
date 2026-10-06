@@ -542,6 +542,7 @@ export const UserManagementView: React.FC = () => {
                     const isTargetSenior = isSeniorManagerUser(u);
                     const isTargetManager = isTargetSenior || u.role === 'MANAGER' || u.role === 'ADMIN' || u.role === 'LAB_MANAGER';
                     const perm = canManageTargetUser(u);
+                    const canResetTargetPassword = isManager && !isCurrent && (!isTargetSenior || isCurrentUserSenior);
                     const canEditUser = !isTargetSenior && (currentUser.role === 'ADMIN' || isCurrent || (!isTargetManager && perm.allowed));
                     const canManageLimits = !isTargetSenior && !isTargetManager && perm.allowed;
                     const canLockUser = !isTargetSenior && (currentUser.role === 'ADMIN' || (!isTargetManager && perm.allowed));
@@ -682,15 +683,15 @@ export const UserManagementView: React.FC = () => {
                         {/* THAO TÁC */}
                         <td className="py-3 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
-                            {/* [ Đổi MK ] - Chỉ Người quản lý cao cấp */}
-                            {isCurrentUserSenior && !isCurrent && (
+                            {/* [ Cấp lại mật khẩu ] */}
+                            {canResetTargetPassword && (
                               <button
                                 onClick={() => setSelectedUserForResetPassword(u)}
-                                className="px-2 py-1 text-[11px] font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 cursor-pointer inline-flex items-center gap-1 shadow-2xs transition-colors"
-                                title="Đặt lại mật khẩu cho thành viên"
+                                className="px-2 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1 shadow-2xs transition-colors"
+                                title="Cấp lại mật khẩu cho thành viên"
                               >
-                                <KeyRound className="w-3 h-3 text-amber-700" />
-                                <span>Đổi MK</span>
+                                <KeyRound className="w-3 h-3 text-purple-700" />
+                                <span>Cấp lại mật khẩu</span>
                               </button>
                             )}
 

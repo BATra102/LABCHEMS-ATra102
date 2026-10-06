@@ -261,7 +261,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-slate-400 mt-0.5 font-mono flex items-center justify-between">
             <span>{bottles.length} chai/lọ</span>
-            <span className="text-blue-600 font-semibold group-hover:underline">Chi tiết →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('inventory', 'ALL') : onNavigateToTab('inventory');
+              }}
+              className="text-blue-600 font-semibold hover:underline cursor-pointer"
+            >
+              Chi tiết →
+            </span>
           </div>
         </div>
 
@@ -279,7 +287,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-rose-600 mt-0.5 flex items-center justify-between">
             <span>≤ Tối thiểu (Min)</span>
-            <span className="font-bold group-hover:underline">Xem ngay →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('inventory', 'CRITICAL') : onNavigateToTab('inventory');
+              }}
+              className="font-bold hover:underline cursor-pointer"
+            >
+              Xem ngay →
+            </span>
           </div>
         </div>
 
@@ -297,7 +313,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-amber-600 mt-0.5 flex items-center justify-between">
             <span>≤ Ngưỡng báo</span>
-            <span className="font-semibold group-hover:underline">Chi tiết →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('inventory', 'LOW') : onNavigateToTab('inventory');
+              }}
+              className="font-semibold hover:underline cursor-pointer"
+            >
+              Chi tiết →
+            </span>
           </div>
         </div>
 
@@ -315,7 +339,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-orange-600 mt-0.5 flex items-center justify-between">
             <span>Ưu tiên dùng</span>
-            <span className="font-semibold group-hover:underline">Xem hạn →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('expiry', 'EXPIRING_90') : onNavigateToTab('expiry');
+              }}
+              className="font-semibold hover:underline cursor-pointer"
+            >
+              Xem hạn →
+            </span>
           </div>
         </div>
 
@@ -333,7 +365,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-rose-600 mt-0.5 font-medium flex items-center justify-between">
             <span>Khóa sử dụng</span>
-            <span className="font-bold group-hover:underline">Tiêu hủy →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('expiry', 'EXPIRED') : onNavigateToTab('expiry');
+              }}
+              className="font-bold hover:underline cursor-pointer"
+            >
+              Tiêu hủy →
+            </span>
           </div>
         </div>
 
@@ -351,7 +391,15 @@ export const DashboardView: React.FC<Props> = ({
           </div>
           <div className="text-[10px] text-cyan-700 mt-0.5 font-mono flex items-center justify-between">
             <span>{bottles.filter((b) => !b.openedDate && b.status !== 'DISPOSED').length} chai niêm</span>
-            <span className="font-bold group-hover:underline">Theo dõi →</span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateWithFilter ? onNavigateWithFilter('inventory', 'IN_USE') : onNavigateToTab('inventory');
+              }}
+              className="font-bold hover:underline cursor-pointer"
+            >
+              Theo dõi →
+            </span>
           </div>
         </div>
       </div>
@@ -470,7 +518,7 @@ export const DashboardView: React.FC<Props> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => onNavigateToTab('reports')}
+                  onClick={() => onNavigateWithFilter ? onNavigateWithFilter('inventory', 'ALL') : onNavigateToTab('inventory')}
                   className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <span>Sổ sách báo cáo →</span>

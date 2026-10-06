@@ -1200,12 +1200,38 @@ export const DashboardStatsDetailModal: React.FC<Props> = ({
             <Info className="w-4 h-4 text-slate-400" />
             <span>Ngày chuẩn đối soát: <strong className="font-mono text-slate-700">{referenceDate}</strong></span>
           </div>
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-          >
-            Đóng
-          </button>
+          <div className="flex items-center gap-2">
+            {(type === 'TOTAL_CHEMICALS' || type === 'CRITICAL_STOCK' || type === 'LOW_STOCK' || type === 'IN_USE') && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onNavigateToTab?.('inventory');
+                }}
+                className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Xem trong Kho Hóa Chất →
+              </button>
+            )}
+            {(type === 'EXPIRING_SOON' || type === 'EXPIRED') && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onNavigateToTab?.('expiry');
+                }}
+                className="px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Xem trang Hạn Dùng →
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+            >
+              Đóng
+            </button>
+          </div>
         </div>
       </div>
 

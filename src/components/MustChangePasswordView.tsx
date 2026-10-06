@@ -119,8 +119,8 @@ export const MustChangePasswordView: React.FC<Props> = ({ onPasswordChanged }) =
               <KeyRound className="w-5 h-5 text-purple-200" />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight">YÊU CẦU ĐỔI MẬT KHẨU</h1>
-              <p className="text-xs text-purple-200">Bắt buộc cho lần đăng nhập đầu tiên</p>
+              <h1 className="text-base font-bold tracking-tight">ĐỔI MẬT KHẨU</h1>
+              <p className="text-xs text-purple-200">Bắt buộc cho lần đăng nhập đầu tiên sau khi được cấp lại mật khẩu</p>
             </div>
           </div>
           <button
@@ -152,13 +152,13 @@ export const MustChangePasswordView: React.FC<Props> = ({ onPasswordChanged }) =
             {/* Mật khẩu hiện tại */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Mật khẩu vừa được cấp (tùy chọn)
+                Mật khẩu hiện tại <span className="text-slate-400 font-normal">(mật khẩu vừa được cấp)</span>
               </label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
                 <input
                   type={showCurrentPassword ? 'text' : 'password'}
-                  placeholder="Nhập mật khẩu tạm thời vừa nhận"
+                  placeholder="Nhập mật khẩu hiện tại bạn vừa nhận"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   className="w-full pl-10 pr-10 py-2.5 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 font-mono"

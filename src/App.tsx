@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LabProvider, useLab } from './context/LabContext';
 import { Header, TabType } from './components/Header';
 import { DashboardView } from './components/DashboardView';
@@ -30,14 +30,71 @@ import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileMenuDrawer } from './components/modals/MobileMenuDrawer';
 import { Login } from './components/Login';
+import { MustChangePasswordView } from './components/MustChangePasswordView';
 import { Bottle, Chemical, User } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { rowToUser } from './services/authService';
 import { auditService } from './services/auditService';
 import { isSeniorManagerEmail } from './utils/roleUtils';
+import { ShieldAlert, AlertTriangle } from 'lucide-react';
+
+/**
+ * Danh mục Route chuẩn theo yêu cầu hệ thống LabChems:
+ * Dashboard     → /dashboard
+ * Kho Hóa Chất  → /chemicals
+ * Lịch Sử       → /history
+ * Mua Sắm       → /purchases
+ * Hạn Dùng      → /expiry
+ * Users         → /users
+ * Cài Đặt       → /settings
+ */
+export const TAB_TO_ROUTE: Record<TabType, string> = {
+  dashboard: '/dashboard',
+  inventory: '/chemicals',
+  usage: '/history',
+  purchase: '/purchases',
+  expiry: '/expiry',
+  users: '/users',
+  settings: '/settings',
+};
+
+export const ROUTE_TO_TAB: Record<string, TabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  chemicals: 'inventory',
+  inventory: 'inventory',
+  bottles: 'inventory',
+  'import-export': 'inventory',
+  history: 'usage',
+  usage: 'usage',
+  purchases: 'purchase',
+  purchase: 'purchase',
+  expiry: 'expiry',
+  users: 'users',
+  settings: 'settings',
+  audit: 'settings',
+  reports: 'inventory',
+};
+
+const resolveRouteFromUrl = (): { tab: TabType; is404: boolean } => {
+  if (typeof window === 'undefined') return { tab: 'dashboard', is404: false };
+  const raw = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, '');
+  if (!raw || raw === 'dashboard') {
+    return { tab: 'dashboard', is404: false };
+  }
+  if (raw === 'login') {
+    return { tab: 'dashboard', is404: false };
+  }
+  if (ROUTE_TO_TAB[raw]) {
+    return { tab: ROUTE_TO_TAB[raw], is404: false };
+  }
+  return { tab: 'dashboard', is404: true };
+};
 
 function MainApp() {
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const initialRoute = resolveRouteFromUrl();
+  const [activeTab, setActiveTabState] = useState<TabType>(initialRoute.tab);
+  const [is404Route, setIs404Route] = useState<boolean>(initialRoute.is404);
 
   // Trạng thái xác thực đăng nhập
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -292,76 +349,81 @@ function MainApp() {
     sessionStorage.removeItem('labchem_v4_current_user_id');
     localStorage.setItem('labchem_remember_me', 'false');
     setIsAuthenticated(false);
-    setActiveTab('dashboard');
+    setActiveTabState('dashboard');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '/login');
+    }
     setAuthErrorMessage(null);
   };
 
-  const handleNavigateWithFilter = (tab: TabType, filter?: string) => {
-    if (tab === 'inventory') {
-      setInventoryInitialFilter(filter);
-    } else if (tab === 'expiry') {
-      setExpiryInitialFilter(filter);
-    }
-    setActiveTab(tab);
-  };
+  /**
+   * Hàm điều hướng chính thức giữa các Tab / Route.
+   * Đồng bộ tức thì cả React state và URL trình duyệt (pushState / replaceState),
+   * không reload trang, giữ người dùng ổn định trên trang vừa chọn.
+   */
+  const navigateToTab = useCallback(
+    (tab: TabType, options?: { replace?: boolean; filter?: string; keepUrl?: boolean }) => {
+      setIs404Route(false);
+      setActiveTabState(tab);
 
-  // Guard against non-managers accessing restricted tabs
-  useEffect(() => {
-    if (!isManager && (activeTab === 'users' || activeTab === 'settings' || activeTab === 'purchase' || activeTab === 'expiry')) {
-      if (currentUser?.email) {
-        auditService.logAccessDenied(
-          currentUser.email,
-          `Từ chối truy cập tab quản trị "${activeTab}" do không có vai trò MANAGER`,
-          { attemptedTab: activeTab, currentRole: currentUser.role },
-          currentUser
-        );
+      if (options?.filter) {
+        if (tab === 'inventory') {
+          setInventoryInitialFilter(options.filter);
+        } else if (tab === 'expiry') {
+          setExpiryInitialFilter(options.filter);
+        }
       }
-      setActiveTab('dashboard');
-    }
-  }, [isManager, activeTab, currentUser]);
 
-  // Bảo vệ toàn bộ URL routes (/dashboard, /chemicals, /bottles, /history, /purchase, /expiry, /users, /settings, /audit, /import-export)
+      if (typeof window !== 'undefined' && !options?.keepUrl) {
+        const targetPath = TAB_TO_ROUTE[tab] || `/${tab}`;
+        if (window.location.pathname.toLowerCase() !== targetPath.toLowerCase()) {
+          if (options?.replace) {
+            window.history.replaceState({ tab }, '', targetPath);
+          } else {
+            window.history.pushState({ tab }, '', targetPath);
+          }
+        }
+      }
+    },
+    []
+  );
+
+  const handleNavigateWithFilter = useCallback(
+    (tab: TabType, filter?: string) => {
+      navigateToTab(tab, { filter });
+    },
+    [navigateToTab]
+  );
+
+  // Lắng nghe sự kiện trình duyệt Back / Forward (popstate)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const handlePopState = () => {
+      const { tab, is404 } = resolveRouteFromUrl();
+      setIs404Route(is404);
+      setActiveTabState(tab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Đồng bộ URL khi đã xác thực và đang ở route gốc '/' hoặc '/login'
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     if (!isAuthenticated) {
       if (window.location.pathname !== '/login') {
         window.history.replaceState(null, '', '/login');
       }
     } else {
-      const currentPath = window.location.pathname.toLowerCase().replace(/^\//, '');
-      const routeToTabMap: Record<string, TabType> = {
-        dashboard: 'dashboard',
-        chemicals: 'inventory',
-        inventory: 'inventory',
-        bottles: 'inventory',
-        history: 'usage',
-        usage: 'usage',
-        purchase: 'purchase',
-        expiry: 'expiry',
-        users: 'users',
-        settings: 'settings',
-        audit: 'settings',
-        'import-export': 'inventory',
-      };
-
-      if (currentPath && routeToTabMap[currentPath]) {
-        const targetTab = routeToTabMap[currentPath];
-        if (targetTab === 'users' || targetTab === 'settings' || targetTab === 'purchase' || targetTab === 'expiry') {
-          if (isManager) {
-            setActiveTab(targetTab);
-          } else {
-            setActiveTab('dashboard');
-            window.history.replaceState(null, '', '/dashboard');
-          }
-        } else {
-          setActiveTab(targetTab);
-        }
-      } else {
-        window.history.replaceState(null, '', `/${activeTab}`);
+      const currentRaw = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, '');
+      if (!currentRaw || currentRaw === 'login') {
+        const targetPath = TAB_TO_ROUTE[activeTab] || '/dashboard';
+        window.history.replaceState({ tab: activeTab }, '', targetPath);
       }
     }
-  }, [isAuthenticated, activeTab, isManager]);
+  }, [isAuthenticated, activeTab]);
 
   // Handlers
   const handleOpenRecordUsage = (chemicalId?: string, bottleId?: string) => {
@@ -406,13 +468,13 @@ function MainApp() {
   const handleSelectChemicalFromSearch = (chemicalId: string, query?: string) => {
     setTargetChemicalId(chemicalId);
     if (query) setInventorySearchTerm(query);
-    setActiveTab('inventory');
+    navigateToTab('inventory');
   };
 
   const handleSearchSubmit = (query: string) => {
     setInventorySearchTerm(query);
     setTargetChemicalId(undefined);
-    setActiveTab('inventory');
+    navigateToTab('inventory');
   };
 
   // 1. Màn hình chờ khi đang kiểm tra / khôi phục phiên làm việc
@@ -451,20 +513,38 @@ function MainApp() {
             sessionStorage.setItem('labchem_v4_is_authenticated', 'true');
             sessionStorage.setItem('labchem_v4_current_user_id', user.id);
           }
-          setActiveTab('dashboard');
+          navigateToTab(activeTab || 'dashboard', { replace: true });
         }}
         initialErrorMessage={authErrorMessage}
       />
     );
   }
 
-  // 3. Khi ĐÃ XÁC THỰC: Hiển thị giao diện hệ thống LabChem
+  // 3. Nếu tài khoản có cờ bắt buộc đổi mật khẩu lần đầu (must_change_password = true)
+  // Ngay lập tức chuyển tới màn hình Đổi mật khẩu, không cho truy cập Dashboard và các chức năng dữ liệu
+  if (currentUser?.must_change_password) {
+    return (
+      <MustChangePasswordView
+        onPasswordChanged={async () => {
+          if (currentUser) {
+            setCurrentUser({
+              ...currentUser,
+              must_change_password: false,
+            });
+          }
+          await refreshFromSupabase();
+        }}
+      />
+    );
+  }
+
+  // 4. Khi ĐÃ XÁC THỰC: Hiển thị giao diện hệ thống LabChem
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       {/* Top Navigation */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigateToTab}
         onOpenRecordUsage={() => handleOpenRecordUsage()}
         onOpenStockIn={() => handleOpenStockIn()}
         onOpenAddChemical={() => setAddChemicalOpen(true)}
@@ -482,76 +562,186 @@ function MainApp() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8 overflow-x-hidden">
-        {/* Role-based Dashboard */}
-        {activeTab === 'dashboard' && (
-          isManager ? (
-            <DashboardView
-              onNavigateToTab={setActiveTab}
-              onNavigateWithFilter={handleNavigateWithFilter}
-              onOpenRecordUsage={handleOpenRecordUsage}
-              onOpenStockIn={handleOpenStockIn}
-              onOpenBottleDetail={handleOpenBottleDetail}
-              onOpenEmailAlerts={() => setEmailAlertsOpen(true)}
-              onOpenDiscrepancyModal={() => handleOpenDiscrepancy()}
-              onOpenUserGuide={() => setUserGuideOpen(true)}
-              onOpenQrScanner={() => setQrScannerOpen(true)}
-            />
-          ) : (
-            <UserDashboardView
-              onNavigateToTab={setActiveTab}
-              onNavigateWithFilter={handleNavigateWithFilter}
-              onOpenRecordUsage={handleOpenRecordUsage}
-              onOpenQrScanner={() => setQrScannerOpen(true)}
-              onOpenBottleDetail={handleOpenBottleDetail}
-              onOpenUserGuide={() => setUserGuideOpen(true)}
-              onSelectChemicalFromSearch={handleSelectChemicalFromSearch}
-            />
-          )
-        )}
+        {/* Fallback 404 Route */}
+        {is404Route ? (
+          <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 shadow-xs space-y-4 animate-in fade-in">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">404 - Không tìm thấy trang</h2>
+            <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+              Đường dẫn <strong className="font-mono text-slate-800">{typeof window !== 'undefined' ? window.location.pathname : ''}</strong> không tồn tại trong hệ thống LabChems.
+            </p>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => navigateToTab('dashboard')}
+                className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                Quay về Trang chủ (Dashboard)
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Role-based Dashboard */}
+            {activeTab === 'dashboard' && (
+              isManager ? (
+                <DashboardView
+                  onNavigateToTab={navigateToTab}
+                  onNavigateWithFilter={handleNavigateWithFilter}
+                  onOpenRecordUsage={handleOpenRecordUsage}
+                  onOpenStockIn={handleOpenStockIn}
+                  onOpenBottleDetail={handleOpenBottleDetail}
+                  onOpenEmailAlerts={() => setEmailAlertsOpen(true)}
+                  onOpenDiscrepancyModal={() => handleOpenDiscrepancy()}
+                  onOpenUserGuide={() => setUserGuideOpen(true)}
+                  onOpenQrScanner={() => setQrScannerOpen(true)}
+                />
+              ) : (
+                <UserDashboardView
+                  onNavigateToTab={navigateToTab}
+                  onNavigateWithFilter={handleNavigateWithFilter}
+                  onOpenRecordUsage={handleOpenRecordUsage}
+                  onOpenQrScanner={() => setQrScannerOpen(true)}
+                  onOpenBottleDetail={handleOpenBottleDetail}
+                  onOpenUserGuide={() => setUserGuideOpen(true)}
+                  onSelectChemicalFromSearch={handleSelectChemicalFromSearch}
+                />
+              )
+            )}
 
-        {activeTab === 'inventory' && (
-          <InventoryView
-            onOpenRecordUsage={handleOpenRecordUsage}
-            onOpenStockIn={handleOpenStockIn}
-            onOpenAddChemical={() => setAddChemicalOpen(true)}
-            onOpenExcelImport={() => setExcelImportOpen(true)}
-            onOpenBottleDetail={handleOpenBottleDetail}
-            onOpenDiscrepancyModal={handleOpenDiscrepancy}
-            onOpenQrScanner={() => setQrScannerOpen(true)}
-            onOpenArchiveCenter={handleOpenArchiveCenter}
-            onOpenDeleteChemical={handleOpenDeleteChemical}
-            externalSearchTerm={inventorySearchTerm}
-            targetChemicalId={targetChemicalId}
-            initialFilterStatus={inventoryInitialFilter}
-          />
-        )}
+            {activeTab === 'inventory' && (
+              <InventoryView
+                onOpenRecordUsage={handleOpenRecordUsage}
+                onOpenStockIn={handleOpenStockIn}
+                onOpenAddChemical={() => setAddChemicalOpen(true)}
+                onOpenExcelImport={() => setExcelImportOpen(true)}
+                onOpenBottleDetail={handleOpenBottleDetail}
+                onOpenDiscrepancyModal={handleOpenDiscrepancy}
+                onOpenQrScanner={() => setQrScannerOpen(true)}
+                onOpenArchiveCenter={handleOpenArchiveCenter}
+                onOpenDeleteChemical={handleOpenDeleteChemical}
+                externalSearchTerm={inventorySearchTerm}
+                targetChemicalId={targetChemicalId}
+                initialFilterStatus={inventoryInitialFilter}
+              />
+            )}
 
-        {activeTab === 'usage' && (
-          <UsageView
-            onOpenRecordUsage={() => handleOpenRecordUsage()}
-            onOpenQrScanner={() => setQrScannerOpen(true)}
-          />
-        )}
+            {activeTab === 'usage' && (
+              <UsageView
+                onOpenRecordUsage={() => handleOpenRecordUsage()}
+                onOpenQrScanner={() => setQrScannerOpen(true)}
+              />
+            )}
 
-        {activeTab === 'purchase' && isManager && (
-          <PurchaseView onOpenStockIn={handleOpenStockIn} />
-        )}
+            {activeTab === 'purchase' && (
+              isManager ? (
+                <PurchaseView onOpenStockIn={handleOpenStockIn} />
+              ) : (
+                <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 shadow-xs space-y-4 animate-in fade-in">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <ShieldAlert className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900">Không có quyền truy cập</h2>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+                    Kế hoạch mua sắm hóa chất yêu cầu vai trò Người Quản Lý (MANAGER). Bạn đang đăng nhập với vai trò <strong>{currentUser?.role || 'THÀNH VIÊN'}</strong>.
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateToTab('dashboard')}
+                      className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Quay về Trang chủ (Dashboard)
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
 
-        {activeTab === 'expiry' && isManager && (
-          <ExpiryView
-            onOpenBottleDetail={handleOpenBottleDetail}
-            onOpenRecordUsage={handleOpenRecordUsage}
-            initialFilterGroup={expiryInitialFilter}
-          />
-        )}
+            {activeTab === 'expiry' && (
+              isManager ? (
+                <ExpiryView
+                  onOpenBottleDetail={handleOpenBottleDetail}
+                  onOpenRecordUsage={handleOpenRecordUsage}
+                  initialFilterGroup={expiryInitialFilter}
+                />
+              ) : (
+                <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 shadow-xs space-y-4 animate-in fade-in">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <ShieldAlert className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900">Không có quyền truy cập</h2>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+                    Trang theo dõi hạn dùng chuyên sâu yêu cầu vai trò Người Quản Lý (MANAGER).
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateToTab('dashboard')}
+                      className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Quay về Trang chủ (Dashboard)
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
 
-        {activeTab === 'users' && isManager && <UserManagementView />}
+            {activeTab === 'users' && (
+              isManager ? (
+                <UserManagementView />
+              ) : (
+                <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 shadow-xs space-y-4 animate-in fade-in">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <ShieldAlert className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900">Không có quyền truy cập</h2>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+                    Trang Quản lý người dùng chỉ dành riêng cho Người Quản Lý (MANAGER).
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateToTab('dashboard')}
+                      className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Quay về Trang chủ (Dashboard)
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
 
-        {activeTab === 'settings' && isManager && (
-          <SettingsView
-            onOpenArchiveCenter={handleOpenArchiveCenter}
-            onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
-          />
+            {activeTab === 'settings' && (
+              isManager ? (
+                <SettingsView
+                  onOpenArchiveCenter={handleOpenArchiveCenter}
+                  onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
+                />
+              ) : (
+                <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 shadow-xs space-y-4 animate-in fade-in">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+                    <ShieldAlert className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900">Không có quyền truy cập</h2>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
+                    Trang Cài đặt hệ thống chỉ dành riêng cho Người Quản Lý (MANAGER).
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateToTab('dashboard')}
+                      className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Quay về Trang chủ (Dashboard)
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
+          </>
         )}
       </main>
 
@@ -630,7 +820,7 @@ function MainApp() {
       <ExcelImportModal
         isOpen={excelImportOpen}
         onClose={() => setExcelImportOpen(false)}
-        onSuccess={() => setActiveTab('inventory')}
+        onSuccess={() => navigateToTab('inventory')}
       />
 
       <UserGuideModal
@@ -651,7 +841,7 @@ function MainApp() {
         isOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigateToTab}
         onOpenRecordUsage={() => handleOpenRecordUsage()}
         onOpenQrScanner={() => setQrScannerOpen(true)}
         onOpenUserProfile={() => setUserProfileOpen(true)}
@@ -663,7 +853,7 @@ function MainApp() {
       {/* Mobile Fixed Bottom Navigation Bar */}
       <MobileBottomNav
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigateToTab}
         onOpenQrScanner={() => setQrScannerOpen(true)}
         onOpenMobileMenu={() => setMobileMenuOpen(true)}
       />

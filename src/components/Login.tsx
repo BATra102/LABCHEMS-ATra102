@@ -5,7 +5,7 @@ import { rowToUser } from '../services/authService';
 import { auditService } from '../services/auditService';
 import { isSeniorManagerEmail } from '../utils/roleUtils';
 import { User } from '../types';
-import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail, KeyRound, X, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail, KeyRound, X, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 interface LoginProps {
   onSuccess?: (user: User, rememberMe?: boolean) => void;
@@ -36,12 +36,8 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
     }
   }, [initialErrorMessage]);
 
-  // State cho modal Khôi phục mật khẩu (Supabase password recovery flow placeholder)
+  // State cho modal Hướng dẫn Quên mật khẩu (Liên hệ Người quản lý)
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [isLoadingReset, setIsLoadingReset] = useState(false);
-  const [resetSuccess, setResetSuccess] = useState(false);
-  const [resetError, setResetError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,40 +294,6 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
     }
   };
 
-  // Xử lý gửi email khôi phục mật khẩu qua Supabase Auth
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedResetEmail = resetEmail.trim().toLowerCase();
-
-    if (!trimmedResetEmail) {
-      setResetError('Vui lòng nhập Email cần khôi phục mật khẩu.');
-      return;
-    }
-
-    setIsLoadingReset(true);
-    setResetError(null);
-    setResetSuccess(false);
-
-    try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.resetPasswordForEmail(trimmedResetEmail, {
-          redirectTo: `${window.location.origin}`,
-        });
-
-        if (error) {
-          throw error;
-        }
-      }
-
-      // Đã gửi thành công hoặc mô phỏng thành công
-      setResetSuccess(true);
-    } catch (err: any) {
-      console.error('Password reset error:', err);
-      setResetError(err.message || 'Không thể gửi email khôi phục. Vui lòng thử lại sau.');
-    } finally {
-      setIsLoadingReset(false);
-    }
-  };
 
   return (
     <div className={`min-h-screen bg-slate-50 flex flex-col justify-center items-center px-4 py-12 ${className}`}>
@@ -435,26 +397,22 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
               )}
             </button>
 
-            {/* Link 'Quên mật khẩu?' đặt bên dưới nút Đăng nhập */}
-            <div className="text-center pt-2">
+            {/* Dòng 'Quên mật khẩu? Liên hệ Người quản lý để được cấp lại.' đặt bên dưới nút Đăng nhập */}
+            <div className="text-center pt-3 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => {
-                  setResetEmail(email.trim());
-                  setResetError(null);
-                  setResetSuccess(false);
-                  setIsForgotPasswordOpen(true);
-                }}
-                className="text-xs font-medium text-purple-700 hover:text-purple-800 hover:underline cursor-pointer transition-colors"
+                onClick={() => setIsForgotPasswordOpen(true)}
+                className="text-xs text-slate-600 hover:text-purple-700 transition-colors cursor-pointer group inline-flex items-center gap-1.5"
               >
-                Quên mật khẩu?
+                <span className="font-semibold text-purple-700 group-hover:underline">Quên mật khẩu?</span>
+                <span>Liên hệ Người quản lý để được cấp lại.</span>
               </button>
             </div>
           </form>
         </div>
       </div>
 
-      {/* Modal Placeholder: Khôi phục mật khẩu (Hỗ trợ luồng Supabase Password Recovery) */}
+      {/* Modal Hướng dẫn: Quên mật khẩu – Liên hệ Người quản lý */}
       {isForgotPasswordOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
@@ -465,8 +423,8 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                   <KeyRound className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900">Khôi Phục Mật Khẩu</h2>
-                  <p className="text-[11px] text-slate-500">Supabase Auth Password Recovery</p>
+                  <h2 className="text-sm font-bold text-slate-900">Quên mật khẩu?</h2>
+                  <p className="text-[11px] text-slate-500">Hướng dẫn cấp lại mật khẩu truy cập LabChem</p>
                 </div>
               </div>
               <button
@@ -480,87 +438,55 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
             </div>
 
             {/* Modal Content */}
-            <div className="p-6">
-              {resetSuccess ? (
-                <div className="space-y-4">
-                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <div className="font-bold text-emerald-950">Đã gửi yêu cầu khôi phục!</div>
-                      <div className="leading-relaxed">
-                        Hệ thống đã gửi liên kết đặt lại mật khẩu đến địa chỉ email: <strong>{resetEmail}</strong>.
-                      </div>
-                      <div className="text-[11px] text-emerald-800 pt-1">
-                        Vui lòng kiểm tra hộp thư đến (kể cả mục Spam / Thư rác) và làm theo hướng dẫn để thiết lập mật khẩu mới.
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsForgotPasswordOpen(false)}
-                    className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-xs"
-                  >
-                    Quay lại đăng nhập
-                  </button>
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-xs text-purple-950 space-y-2 leading-relaxed">
+                <div className="font-bold text-sm text-purple-900">
+                  Vui lòng liên hệ Người quản lý để được cấp lại mật khẩu.
                 </div>
-              ) : (
-                <form onSubmit={handleResetPassword} className="space-y-4">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Nhập địa chỉ email tài khoản của bạn để nhận liên kết đặt lại mật khẩu an toàn từ Supabase Authentication.
-                  </p>
+                <p className="text-purple-800">
+                  Sau khi được cấp mật khẩu mới, hãy đăng nhập và đổi sang mật khẩu riêng của bạn.
+                </p>
+              </div>
 
+              {/* Thông tin liên hệ Người quản lý */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <Mail className="w-4 h-4 text-purple-600" />
+                  <span>Thông tin liên hệ Người quản lý:</span>
+                </div>
+                <div className="space-y-1.5 text-slate-600 pl-1">
                   <div>
-                    <label htmlFor="reset-email" className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      Email tài khoản
-                    </label>
-                    <div className="relative">
-                      <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
-                      <input
-                        id="reset-email"
-                        type="email"
-                        required
-                        autoFocus
-                        placeholder="name@example.com"
-                        value={resetEmail}
-                        onChange={(e) => setResetEmail(e.target.value)}
-                        className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
-                      />
-                    </div>
+                    <span className="text-slate-400">Người quản lý cao cấp:</span>{' '}
+                    <strong className="font-mono text-purple-700 font-semibold select-all">buiantra2021@gmail.com</strong>
                   </div>
-
-                  {resetError && (
-                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2.5 animate-in fade-in">
-                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                      <div className="leading-relaxed font-medium">{resetError}</div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsForgotPasswordOpen(false)}
-                      className="flex-1 py-2.5 px-4 border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl transition-all cursor-pointer"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isLoadingReset}
-                      className="flex-1 py-2.5 px-4 bg-purple-700 hover:bg-purple-800 active:bg-purple-900 disabled:opacity-60 text-white text-xs font-semibold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      {isLoadingReset ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Đang gửi...</span>
-                        </>
-                      ) : (
-                        <span>Gửi liên kết</span>
-                      )}
-                    </button>
+                  <div>
+                    <span className="text-slate-400">Quản lý phòng Lab:</span>{' '}
+                    <strong className="font-mono text-slate-800 font-semibold select-all">jasminebee279@gmail.com</strong>
                   </div>
-                </form>
-              )}
+                  <div className="text-[11px] text-slate-500 pt-1">
+                    Phòng phụ trách: Quản trị hệ thống & Quản lý phòng thí nghiệm LabChem
+                  </div>
+                </div>
+              </div>
+
+              {/* Quy định bảo mật */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 space-y-1">
+                <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Quy định bảo mật:</span>
+                </div>
+                <p>• Người dùng không thể tự xem hoặc khôi phục mật khẩu cũ.</p>
+                <p>• Người quản lý sẽ cấp mật khẩu mới ngẫu nhiên và an toàn cho tài khoản của bạn.</p>
+                <p>• Sau khi nhận được mật khẩu mới, bạn sẽ đăng nhập và thực hiện đổi sang mật khẩu riêng.</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsForgotPasswordOpen(false)}
+                className="w-full py-2.5 px-4 bg-purple-700 hover:bg-purple-800 active:bg-purple-900 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-xs"
+              >
+                Đã hiểu & Quay lại đăng nhập
+              </button>
             </div>
           </div>
         </div>
