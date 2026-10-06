@@ -13,7 +13,51 @@ export const SENIOR_MANAGER_EMAILS: readonly string[] = [
   'buianhtraa2021@gmail.com',
 ];
 
+export const SENIOR_MANAGER_USERNAMES: readonly string[] = [
+  'manager',
+  'admin',
+  'buiantra',
+  'buiantra2021',
+  'buianhtra',
+  'buianhtra2021',
+  'buiantra2021@gmail.com',
+  'buianhtra2021@gmail.com',
+];
+
+export const LAB_MANAGER_USERNAMES: readonly string[] = [
+  'labmanager',
+  'jasminebee279',
+  'jasminebee27',
+  'jasminebee279@gmail.com',
+];
+
 export const PRIMARY_SENIOR_MANAGER_EMAIL = 'buiantra2021@gmail.com';
+
+/**
+ * Kiểm tra xem một email hoặc username có thuộc Người quản lý cao cấp hay không
+ */
+export function isSeniorManagerIdentifier(identifier?: string | null): boolean {
+  if (!identifier) return false;
+  const normalized = identifier.trim().toLowerCase();
+  return (
+    isSeniorManagerEmail(normalized) ||
+    SENIOR_MANAGER_USERNAMES.includes(normalized) ||
+    normalized.startsWith('buiantra')
+  );
+}
+
+/**
+ * Kiểm tra xem một email hoặc username có thuộc Quản lý Lab hay không
+ */
+export function isLabManagerIdentifier(identifier?: string | null): boolean {
+  if (!identifier) return false;
+  const normalized = identifier.trim().toLowerCase();
+  return (
+    normalized === 'jasminebee279@gmail.com' ||
+    LAB_MANAGER_USERNAMES.includes(normalized) ||
+    normalized.startsWith('jasminebee')
+  );
+}
 
 /**
  * Kiểm tra xem một email có thuộc danh sách Người quản lý cao cấp hay không

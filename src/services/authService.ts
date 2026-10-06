@@ -11,8 +11,17 @@ export const rowToUser = (row: any): User => {
 
   return {
     id: row.id,
+    username:
+      row.username ||
+      (isSenior
+        ? 'manager'
+        : row.email
+        ? row.email.split('@')[0]
+        : row.google_email
+        ? row.google_email.split('@')[0]
+        : ''),
     name: row.full_name || (isSenior ? 'Người quản lý cao cấp' : 'Người dùng Lab'),
-    email: row.google_email || '',
+    email: row.google_email || row.email || '',
     role,
     status: (row.status || 'ACTIVE') as UserStatus,
     department: row.department || 'Bộ môn Dược liệu & Chiết xuất',
@@ -55,6 +64,80 @@ export const rowToUser = (row: any): User => {
 };
 
 export const authService = {
+  async signInWithUsername(username: string, password: string): Promise<{ data: any; error: any }> {
+    const trimmed = username.trim().toLowerCase();
+    if (!trimmed) {
+      return { data: null, error: new Error('Vui lòng nhập Tên đăng nhập.') };
+    }
+
+    // 1. Thử gọi backend API bảo mật /api/login-with-username
+    try {
+      const res = await fetch('/api/login-with-username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: trimmed, password }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.session) {
+          try {
+            await supabase.auth.setSession({
+              access_token: json.session.access_token,
+              refresh_token: json.session.refresh_token,
+            });
+          } catch (_) {}
+          return { data: json, error: null };
+        }
+        if (json.success && json.user) {
+          return { data: json, error: null };
+        }
+        if (!json.success) {
+          return { data: null, error: new Error(json.message || 'Tên đăng nhập hoặc mật khẩu không chính xác.') };
+        }
+      }
+    } catch (_) {}
+
+    // 2. Tra cứu email nội bộ tương ứng với username
+    let internalEmail = '';
+    const isSenior =
+      trimmed === 'manager' ||
+      trimmed === 'admin' ||
+      trimmed === 'buiantra' ||
+      trimmed === 'buiantra2021' ||
+      trimmed === 'buiantra2021@gmail.com';
+    const isLabMgr =
+      trimmed === 'labmanager' ||
+      trimmed === 'jasminebee279' ||
+      trimmed === 'jasminebee279@gmail.com';
+
+    if (isSenior) {
+      internalEmail = 'buiantra2021@gmail.com';
+    } else if (isLabMgr) {
+      internalEmail = 'jasminebee279@gmail.com';
+    } else {
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('email, google_email, username')
+          .ilike('username', trimmed)
+          .maybeSingle();
+
+        if (prof?.email || prof?.google_email) {
+          internalEmail = prof.email || prof.google_email;
+        }
+      } catch (_) {}
+
+      if (!internalEmail) {
+        internalEmail = `${trimmed}@labchem.local`;
+      }
+    }
+
+    return supabase.auth.signInWithPassword({
+      email: internalEmail,
+      password,
+    });
+  },
+
   async signInWithPassword(email: string, password: string) {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase chưa được cấu hình.');

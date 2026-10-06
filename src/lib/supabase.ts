@@ -5,11 +5,13 @@ export { supabaseClient, supabase, isSupabaseConfigured };
 
 // Lấy thông tin cấu hình phục vụ trạng thái hiển thị (tuyệt đối không để lộ Secret Key)
 export const getSupabaseConfig = () => {
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
+  const envUrl =
+    (import.meta.env.VITE_SUPABASE_URL as string) ||
+    'https://hlkprapotgvtmqqnwddx.supabase.co';
   const envPublishableKey =
     (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) ||
     (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
-    '';
+    'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
 
   return {
     url: envUrl,
@@ -18,7 +20,7 @@ export const getSupabaseConfig = () => {
     isFromEnv: Boolean(envUrl && envPublishableKey),
     isConfigured: isSupabaseConfigured(),
     // Tên miền hiển thị an toàn (không hiển thị đầy đủ token hay key)
-    maskedHost: envUrl ? new URL(envUrl).hostname : 'Chưa cấu hình',
+    maskedHost: envUrl ? new URL(envUrl).hostname : 'hlkprapotgvtmqqnwddx.supabase.co',
   };
 };
 

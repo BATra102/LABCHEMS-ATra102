@@ -28,8 +28,8 @@ export interface CreateAccountModalProps {
 export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentUser } = useLab();
 
+  const [username, setUsername] = useState('');
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState<UserRole>('STAFF');
@@ -65,16 +65,22 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
     e.preventDefault();
     setErrorMessage(null);
 
-    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedUsername = username.trim().toLowerCase();
     const trimmedName = name.trim();
 
-    if (!trimmedName) {
-      setErrorMessage('Vui lòng nhập Họ và tên.');
+    if (!trimmedUsername) {
+      setErrorMessage('Vui lòng nhập Tên đăng nhập.');
       return;
     }
 
-    if (!trimmedEmail) {
-      setErrorMessage('Vui lòng nhập Email đăng nhập.');
+    const usernameRegex = /^[a-zA-Z0-9_.]+$/;
+    if (!usernameRegex.test(trimmedUsername)) {
+      setErrorMessage('Tên đăng nhập chỉ được chứa chữ cái, số, dấu gạch dưới (_) hoặc dấu chấm (.).');
+      return;
+    }
+
+    if (!trimmedName) {
+      setErrorMessage('Vui lòng nhập Họ và tên.');
       return;
     }
 
@@ -96,11 +102,11 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
     setIsLoading(true);
 
     try {
-      // Gọi logic tạo tài khoản thật qua Supabase Auth và thêm bản ghi vào bảng 'profiles'
+      // Cấp tài khoản bằng Tên đăng nhập và mật khẩu
       const res = await userService.provisionUser(
         {
+          username: trimmedUsername,
           name: trimmedName,
-          email: trimmedEmail,
           password,
           role,
           status,
@@ -135,9 +141,10 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
     if (!createdResult) return;
     const loginUrl = window.location.origin;
     const textToCopy = `LABCHEM - THÔNG TIN TÀI KHOẢN ĐĂNG NHẬP
+Tên đăng nhập: ${createdResult.user.username || createdResult.user.email}
+Mật khẩu: ${createdResult.tempPassword || '(Không hiển thị lại)'}
 Họ và tên: ${createdResult.user.name}
-Email đăng nhập: ${createdResult.user.email}
-Mật khẩu tạm thời: ${createdResult.tempPassword || '(Không hiển thị lại)'}
+Bộ môn / Phòng ban: ${createdResult.user.department}
 Vai trò: ${createdResult.user.role}
 Trạng thái: ${createdResult.user.status}
 Trang đăng nhập: ${loginUrl}
@@ -149,8 +156,8 @@ Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
   };
 
   const handleResetAndClose = () => {
+    setUsername('');
     setName('');
-    setEmail('');
     setPassword('');
     setConfirmPassword('');
     setRole('STAFF');
@@ -305,6 +312,24 @@ Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
             /* FORM CẤP TÀI KHOẢN MỚI                              */
             /* =================================================== */
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Tên đăng nhập */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Tên đăng nhập <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="vd: nhom2 hoặc lab01"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full pl-10 pr-3.5 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
+                  />
+                </div>
+              </div>
+
               {/* Họ và tên */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -315,27 +340,9 @@ Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
                   <input
                     type="text"
                     required
-                    placeholder="vd: Nguyễn Văn A"
+                    placeholder="vd: Nguyễn Văn A hoặc Nhóm 2"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-10 pr-3.5 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
-                  />
-                </div>
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Email <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="nguyenvana@gmail.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-3.5 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
                   />
                 </div>
