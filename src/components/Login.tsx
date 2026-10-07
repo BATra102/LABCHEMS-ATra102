@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { useLab } from '../context/LabContext';
-import { rowToUser } from '../services/authService';
+import { rowToUser, authService } from '../services/authService';
 import { auditService } from '../services/auditService';
 import {
   isSeniorManagerEmail,
@@ -9,7 +9,7 @@ import {
   isLabManagerIdentifier,
 } from '../utils/roleUtils';
 import { User } from '../types';
-import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail, KeyRound, X, Database, ShieldCheck, Copy, Check } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail, User as UserIcon, KeyRound, X, Database, ShieldCheck, Copy, Check } from 'lucide-react';
 
 interface LoginProps {
   onSuccess?: (user: User, rememberMe?: boolean) => void;
@@ -84,7 +84,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
     const trimmedInput = email.trim().toLowerCase();
 
     if (!trimmedInput) {
-      setErrorMessage('Vui lòng nhập Tên đăng nhập hoặc Email.');
+      setErrorMessage('Vui lòng nhập Tên đăng nhập.');
       return;
     }
 
@@ -185,13 +185,30 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
       }
 
       // 3. Xác thực người dùng bằng Supabase Auth
-      const emailToAuth = trimmedInput.includes('@')
-        ? trimmedInput
-        : isSenior
-        ? 'buiantra2021@gmail.com'
-        : isDesignatedManager
-        ? 'jasminebee279@gmail.com'
-        : `${trimmedInput}@labchem.local`;
+      let emailToAuth = '';
+      if (trimmedInput.includes('@')) {
+        emailToAuth = trimmedInput;
+      } else if (isSenior) {
+        emailToAuth = 'buiantra2021@gmail.com';
+      } else if (isDesignatedManager) {
+        emailToAuth = 'jasminebee279@gmail.com';
+      } else {
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('email, google_email, username')
+            .ilike('username', trimmedInput)
+            .maybeSingle();
+
+          if (prof?.email || prof?.google_email) {
+            emailToAuth = prof.email || prof.google_email;
+          }
+        } catch (_) {}
+
+        if (!emailToAuth) {
+          emailToAuth = `${trimmedInput}@labchem.local`;
+        }
+      }
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: emailToAuth,
@@ -398,45 +415,45 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
               <button
                 type="button"
-                onClick={() => fillManagerCredentials('buiantra2021@gmail.com', 'LabChem@2026')}
+                onClick={() => fillManagerCredentials('buiantra', 'LabChem@2026')}
                 className="p-2 bg-white hover:bg-purple-100/50 border border-purple-200 rounded-lg text-left transition-colors cursor-pointer group shadow-2xs"
               >
                 <div className="font-bold text-purple-900 group-hover:text-purple-700 flex items-center justify-between">
                   <span>Quản lý cao cấp</span>
                   <span className="text-[9px] bg-purple-700 text-white px-1.5 py-0.5 rounded font-medium">Điền ngay</span>
                 </div>
-                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">buiantra2021@gmail.com</div>
+                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">User: buiantra</div>
                 <div className="text-[10px] text-purple-800 font-mono font-medium">Pass: LabChem@2026</div>
               </button>
               <button
                 type="button"
-                onClick={() => fillManagerCredentials('jasminebee279@gmail.com', 'LabChem@2026')}
+                onClick={() => fillManagerCredentials('labmanager', 'LabChem@2026')}
                 className="p-2 bg-white hover:bg-purple-100/50 border border-purple-200 rounded-lg text-left transition-colors cursor-pointer group shadow-2xs"
               >
                 <div className="font-bold text-slate-800 group-hover:text-purple-700 flex items-center justify-between">
                   <span>Quản lý Lab</span>
                   <span className="text-[9px] bg-slate-700 text-white px-1.5 py-0.5 rounded font-medium">Điền ngay</span>
                 </div>
-                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">jasminebee279@gmail.com</div>
+                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">User: labmanager</div>
                 <div className="text-[10px] text-purple-800 font-mono font-medium">Pass: LabChem@2026</div>
               </button>
             </div>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* Trường Tên đăng nhập hoặc Email */}
+            {/* Trường Tên đăng nhập */}
             <div>
-              <label htmlFor="login-email" className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Tên đăng nhập hoặc Email
+              <label htmlFor="login-username" className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Tên đăng nhập
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
+                <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
                 <input
-                  id="login-email"
+                  id="login-username"
                   type="text"
                   required
                   autoComplete="username"
-                  placeholder="Ví dụ: buiantra2021@gmail.com hoặc manager"
+                  placeholder="Nhập tên đăng nhập... (vd: buiantra, nhom2)"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
@@ -581,7 +598,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                     <button
                       type="button"
                       onClick={() => {
-                        fillManagerCredentials('buiantra2021@gmail.com', 'LabChem@2026');
+                        fillManagerCredentials('buiantra', 'LabChem@2026');
                         setIsForgotPasswordOpen(false);
                       }}
                       className="text-[10px] bg-purple-600 hover:bg-purple-700 text-white font-semibold px-2 py-0.5 rounded cursor-pointer transition-colors"
@@ -591,14 +608,14 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                   </div>
                   <div className="text-[11px] text-slate-700 font-mono space-y-0.5">
                     <div className="flex items-center justify-between">
-                      <span>Email: <strong className="text-purple-700 font-semibold select-all">buiantra2021@gmail.com</strong></span>
+                      <span>Tên đăng nhập: <strong className="text-purple-700 font-semibold select-all">buiantra</strong></span>
                       <button
                         type="button"
-                        onClick={() => copyToClipboard('buiantra2021@gmail.com', 'm1-email')}
+                        onClick={() => copyToClipboard('buiantra', 'm1-username')}
                         className="text-slate-400 hover:text-purple-700 p-0.5 cursor-pointer"
-                        title="Sao chép email"
+                        title="Sao chép tên đăng nhập"
                       >
-                        {copiedKey === 'm1-email' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        {copiedKey === 'm1-username' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                       </button>
                     </div>
                     <div className="flex items-center justify-between">
@@ -622,7 +639,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                     <button
                       type="button"
                       onClick={() => {
-                        fillManagerCredentials('jasminebee279@gmail.com', 'LabChem@2026');
+                        fillManagerCredentials('labmanager', 'LabChem@2026');
                         setIsForgotPasswordOpen(false);
                       }}
                       className="text-[10px] bg-slate-700 hover:bg-slate-800 text-white font-semibold px-2 py-0.5 rounded cursor-pointer transition-colors"
@@ -632,14 +649,14 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                   </div>
                   <div className="text-[11px] text-slate-700 font-mono space-y-0.5">
                     <div className="flex items-center justify-between">
-                      <span>Email: <strong className="text-slate-800 font-semibold select-all">jasminebee279@gmail.com</strong></span>
+                      <span>Tên đăng nhập: <strong className="text-slate-800 font-semibold select-all">labmanager</strong></span>
                       <button
                         type="button"
-                        onClick={() => copyToClipboard('jasminebee279@gmail.com', 'm2-email')}
+                        onClick={() => copyToClipboard('labmanager', 'm2-username')}
                         className="text-slate-400 hover:text-slate-700 p-0.5 cursor-pointer"
-                        title="Sao chép email"
+                        title="Sao chép tên đăng nhập"
                       >
-                        {copiedKey === 'm2-email' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        {copiedKey === 'm2-username' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                       </button>
                     </div>
                     <div className="flex items-center justify-between">

@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
+  const serverKnownUsernames = new Set<string>(['manager', 'admin', 'buiantra', 'labmanager']);
 
   app.use(express.json());
 
@@ -397,17 +398,17 @@ async function startServer() {
   });
 
   /**
-   * POST /api/admin-create-user
+   * POST /api/admin-create-user & /api/create-user
    * Endpoint cấp tài khoản mới an toàn bởi Người quản lý (Server-side Admin API)
    * Không yêu cầu Email từ người dùng - sử dụng Username duy nhất
    */
-  app.post('/api/admin-create-user', async (req, res) => {
+  app.post(['/api/admin-create-user', '/api/create-user'], async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
-      const { username, name, email, password, role, department, status } = req.body;
+      const { username, name, full_name, email, password, role, department, status } = req.body;
 
       const trimmedUsername = String(username || email || '').trim().toLowerCase();
-      const trimmedName = String(name || '').trim();
+      const trimmedName = String(name || full_name || '').trim();
 
       if (!trimmedUsername) {
         return res.status(400).json({
@@ -469,15 +470,29 @@ async function startServer() {
         } catch (_) {}
       }
 
-      // Kiểm tra xem username đã tồn tại trong public.profiles chưa
+      // Kiểm tra xem username đã tồn tại chưa (Unique username)
+      if (serverKnownUsernames.has(usernameClean)) {
+        return res.status(400).json({
+          success: false,
+          message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
+        });
+      }
+
+      const dbClient = supabaseServiceKey
+        ? createClient(supabaseUrl, supabaseServiceKey, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          })
+        : clientWithToken;
+
       try {
-        const { data: existingUser } = await clientWithToken
+        const { data: existingUser } = await dbClient
           .from('profiles')
           .select('id, username')
           .ilike('username', usernameClean)
           .maybeSingle();
 
         if (existingUser) {
+          serverKnownUsernames.add(usernameClean);
           return res.status(400).json({
             success: false,
             message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
@@ -610,6 +625,8 @@ async function startServer() {
         dateJoined: new Date().toISOString().split('T')[0],
       };
 
+      serverKnownUsernames.add(usernameClean);
+
       return res.json({
         success: true,
         user: createdUser,
@@ -621,6 +638,54 @@ async function startServer() {
         success: false,
         message: err.message || 'Lỗi khi cấp tài khoản.',
       });
+    }
+  });
+
+  /**
+   * GET /api/users & /api/profiles
+   * Lấy danh sách profiles mới nhất trực tiếp từ cơ sở dữ liệu Supabase
+   */
+  app.get(['/api/users', '/api/profiles'], async (req, res) => {
+    try {
+      const supabaseUrl =
+        process.env.VITE_SUPABASE_URL ||
+        process.env.SUPABASE_URL ||
+        'https://hlkprapotgvtmqqnwddx.supabase.co';
+      const supabaseAnonKey =
+        process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      const client = supabaseServiceKey
+        ? createClient(supabaseUrl, supabaseServiceKey, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          })
+        : createClient(supabaseUrl, supabaseAnonKey);
+
+      const { data, error } = await client
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+
+      // Cập nhật lại serverKnownUsernames
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          if (item.username) {
+            serverKnownUsernames.add(item.username.toLowerCase());
+          }
+        }
+      }
+
+      return res.json({ success: true, data: data || [] });
+    } catch (err: any) {
+      console.error('API GET /api/users error:', err);
+      return res.status(500).json({ success: false, error: err.message });
     }
   });
 

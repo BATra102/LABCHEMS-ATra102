@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLab } from '../context/LabContext';
 import { User, UserRole, UserStatus } from '../types';
+import { supabase } from '../lib/supabase';
+import { rowToUser } from '../services/authService';
 import {
   Users,
   UserCheck,
@@ -52,12 +54,54 @@ export const UserManagementView: React.FC = () => {
     deleteDeactivatedManager,
     restoreUser,
     refreshFromSupabase,
+    refreshUsers: contextRefreshUsers,
+    setUsers,
   } = useLab();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | UserStatus>('ALL');
   const [departmentFilter, setDepartmentFilter] = useState<'ALL' | string>('ALL');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  /**
+   * Tải lại danh sách Users mới nhất trực tiếp từ bảng profiles trong Supabase
+   */
+  const refreshUsers = async (): Promise<User[]> => {
+    setIsRefreshing(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[Users] Refresh failed:', error);
+        const fallbackUsers = await contextRefreshUsers();
+        return fallbackUsers;
+      }
+
+      if (data && data.length > 0) {
+        const formatted = data.map(rowToUser);
+        setUsers(formatted);
+        return formatted;
+      } else {
+        const fallbackUsers = await contextRefreshUsers();
+        return fallbackUsers;
+      }
+    } catch (err) {
+      console.error('[Users] Refresh failed:', err);
+      const fallbackUsers = await contextRefreshUsers();
+      return fallbackUsers;
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    // Tự động tải lại profiles mới nhất khi mở trang Quản lý người dùng
+    refreshUsers();
+  }, []);
 
   // Cấp tài khoản mới (Chỉ Người quản lý cao cấp)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
@@ -126,6 +170,7 @@ export const UserManagementView: React.FC = () => {
       const q = searchTerm.toLowerCase();
       return (
         u.name.toLowerCase().includes(q) ||
+        (u.username && u.username.toLowerCase().includes(q)) ||
         u.email.toLowerCase().includes(q) ||
         u.department.toLowerCase().includes(q) ||
         (u.manager_name && u.manager_name.toLowerCase().includes(q)) ||
@@ -154,14 +199,26 @@ export const UserManagementView: React.FC = () => {
         </div>
 
         {isManager && (
-          <button
-            type="button"
-            onClick={() => setIsProvisionModalOpen(true)}
-            className="px-4 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl transition-all flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>+ Cấp tài khoản</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => refreshUsers()}
+              disabled={isRefreshing}
+              className="px-3 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Tải lại danh sách người dùng mới nhất từ Supabase"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-purple-700' : ''}`} />
+              <span className="hidden sm:inline">Làm mới</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsProvisionModalOpen(true)}
+              className="px-4 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl transition-all flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>+ Cấp tài khoản</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -520,7 +577,7 @@ export const UserManagementView: React.FC = () => {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                   <th className="py-3 px-4">THÀNH VIÊN</th>
-                  <th className="py-3 px-4">EMAIL ĐĂNG NHẬP</th>
+                  <th className="py-3 px-4">TÊN ĐĂNG NHẬP / EMAIL</th>
                   <th className="py-3 px-4">VAI TRÒ</th>
                   <th className="py-3 px-4">BỘ MÔN</th>
                   <th className="py-3 px-4">ĐỊNH MỨC & HẠN CHẾ</th>
@@ -589,9 +646,18 @@ export const UserManagementView: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* EMAIL GOOGLE */}
+                        {/* TÊN ĐĂNG NHẬP / EMAIL */}
                         <td className="py-3 px-4 font-mono text-slate-700 text-[11px] whitespace-nowrap">
-                          {u.email}
+                          {u.username ? (
+                            <div className="flex flex-col">
+                              <span className="font-bold text-purple-700">@{u.username}</span>
+                              {u.email && !u.email.endsWith('@labchem.local') && (
+                                <span className="text-[10px] text-slate-400 font-sans">{u.email}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span>{u.email}</span>
+                          )}
                         </td>
 
                         {/* VAI TRÒ */}
@@ -885,9 +951,11 @@ export const UserManagementView: React.FC = () => {
       <CreateAccountModal
         isOpen={isProvisionModalOpen}
         onClose={() => setIsProvisionModalOpen(false)}
+        refreshUsers={refreshUsers}
         onSuccess={async (newUser) => {
-          showMsg(`✓ Đã cấp tài khoản thành công cho "${newUser.name}"!`);
-          await refreshFromSupabase();
+          showMsg(
+            `✓ Cấp tài khoản thành công cho "${newUser.name}" (Tên đăng nhập: ${newUser.username || newUser.email})!`
+          );
         }}
       />
 

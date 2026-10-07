@@ -97,6 +97,24 @@ export const authService = {
       }
     } catch (_) {}
 
+    // 1b. Thử gọi Supabase Edge Function login-with-username
+    try {
+      const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('login-with-username', {
+        body: { username: trimmed, password },
+      });
+      if (!edgeErr && edgeData?.success) {
+        if (edgeData.session) {
+          try {
+            await supabase.auth.setSession({
+              access_token: edgeData.session.access_token,
+              refresh_token: edgeData.session.refresh_token,
+            });
+          } catch (_) {}
+        }
+        return { data: edgeData, error: null };
+      }
+    } catch (_) {}
+
     // 2. Tra cứu email nội bộ tương ứng với username
     let internalEmail = '';
     const isSenior =
@@ -114,6 +132,8 @@ export const authService = {
       internalEmail = 'buiantra2021@gmail.com';
     } else if (isLabMgr) {
       internalEmail = 'jasminebee279@gmail.com';
+    } else if (trimmed.includes('@')) {
+      internalEmail = trimmed;
     } else {
       try {
         const { data: prof } = await supabase
@@ -221,14 +241,29 @@ export const authService = {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .order('full_name', { ascending: true });
+        .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Users] Refresh failed from Supabase client:', error);
+        throw error;
+      }
       const formatted: User[] = (data || []).map(rowToUser);
       return { data: formatted, error: null };
     } catch (err: any) {
+      // Dự phòng gọi backend API /api/users nếu client gặp sự cố RLS hoặc phân quyền
+      try {
+        const res = await fetch('/api/users');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+            const formatted: User[] = json.data.map(rowToUser);
+            return { data: formatted, error: null };
+          }
+        }
+      } catch (_) {}
+
       if (err?.code !== '42501') {
-        console.error('authService.fetchProfiles error:', err);
+        console.error('[Users] authService.fetchProfiles error:', err);
       } else {
         console.warn('authService.fetchProfiles (permission denied or unauthenticated):', err.message);
       }

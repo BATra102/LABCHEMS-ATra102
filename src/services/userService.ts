@@ -182,6 +182,7 @@ export const userService = {
         body: JSON.stringify({
           username: trimmedUsername,
           name: trimmedName,
+          full_name: trimmedName,
           email: internalEmail,
           password: params.password,
           role: params.role,
@@ -205,9 +206,50 @@ export const userService = {
             message: resJson.message,
           };
         }
+      } else {
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.message) {
+            return {
+              success: false,
+              message: errJson.message,
+            };
+          }
+        } catch (_) {}
       }
     } catch (apiErr) {
       console.warn('Backend API /api/admin-create-user notice:', apiErr);
+    }
+
+    // 3b. Thử gọi Supabase Edge Function create-user
+    try {
+      const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('create-user', {
+        body: {
+          username: trimmedUsername,
+          full_name: trimmedName,
+          name: trimmedName,
+          password: params.password,
+          role: params.role,
+          status: params.status || 'ACTIVE',
+          department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
+        },
+      });
+
+      if (!edgeErr && edgeData?.success && edgeData?.user) {
+        return {
+          success: true,
+          user: edgeData.user,
+          message: edgeData.message || `Đã cấp tài khoản thành công cho "${trimmedUsername}".`,
+        };
+      }
+      if (edgeData && !edgeData.success && edgeData.message) {
+        return {
+          success: false,
+          message: edgeData.message,
+        };
+      }
+    } catch (edgeEx) {
+      console.warn('Edge Function create-user notice:', edgeEx);
     }
 
     try {

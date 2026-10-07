@@ -22,11 +22,17 @@ import {
 export interface CreateAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (user: User) => void;
+  refreshUsers?: () => Promise<any>;
+  onSuccess?: (user: User) => void | Promise<void>;
 }
 
-export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const { currentUser } = useLab();
+export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({
+  isOpen,
+  onClose,
+  refreshUsers,
+  onSuccess,
+}) => {
+  const { currentUser, refreshUsers: contextRefreshUsers } = useLab();
 
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
@@ -59,6 +65,18 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
     setConfirmPassword(generated);
     setShowPassword(true);
     setShowConfirmPassword(true);
+  };
+
+  const resetForm = () => {
+    setUsername('');
+    setName('');
+    setPassword('');
+    setConfirmPassword('');
+    setRole('STAFF');
+    setStatus('ACTIVE');
+    setDepartment('Bộ môn Dược liệu & Chiết xuất');
+    setCreatedResult(null);
+    setErrorMessage(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -102,7 +120,7 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
     setIsLoading(true);
 
     try {
-      // Cấp tài khoản bằng Tên đăng nhập và mật khẩu
+      // 1. Cấp tài khoản mới qua Backend / Edge Function
       const res = await userService.provisionUser(
         {
           username: trimmedUsername,
@@ -120,14 +138,22 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({ isOpen, 
         return;
       }
 
-      // Chuyển sang màn hình hiển thị mật khẩu tạm thời một lần duy nhất
-      setCreatedResult({
-        user: res.user,
-        tempPassword: password,
-      });
+      // 2. BẮT BUỘC: Refresh toàn bộ dữ liệu Users từ Supabase trước khi kết thúc flow
+      if (refreshUsers) {
+        await refreshUsers();
+      } else if (contextRefreshUsers) {
+        await contextRefreshUsers();
+      }
 
+      // 3. Đóng modal
+      onClose();
+
+      // 4. Reset form
+      resetForm();
+
+      // 5. Hiển thị thông báo toast thành công
       if (onSuccess) {
-        onSuccess(res.user);
+        await onSuccess(res.user);
       }
     } catch (err: any) {
       console.error('Error creating account:', err);
@@ -220,8 +246,8 @@ Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
                   <span className="font-bold text-slate-900">{createdResult.user.name}</span>
                 </div>
                 <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                  <span className="text-slate-500">Email đăng nhập:</span>
-                  <span className="font-mono font-bold text-purple-700">{createdResult.user.email}</span>
+                  <span className="text-slate-500">Tên đăng nhập:</span>
+                  <span className="font-mono font-bold text-purple-700">{createdResult.user.username || createdResult.user.email}</span>
                 </div>
                 <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                   <span className="text-slate-500">Vai trò:</span>

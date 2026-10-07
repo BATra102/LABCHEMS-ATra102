@@ -266,6 +266,8 @@ interface LabContextType {
   isLoading: boolean;
   loadError: string | null;
   refreshFromSupabase: () => Promise<void>;
+  refreshUsers: () => Promise<User[]>;
+  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
 }
 
 const LabContext = createContext<LabContextType | undefined>(undefined);
@@ -577,23 +579,24 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isLoading, setIsLoading] = useState<boolean>(isSupabaseConfigured());
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  /**
+   * Tải lại danh sách Users trực tiếp từ Supabase và cập nhật state toàn hệ thống
+   */
+  const refreshUsers = async (): Promise<User[]> => {
+    try {
+      const res = await authService.fetchProfiles();
+      if (res.data && res.data.length > 0) {
+        setUsers(res.data);
+        return res.data;
+      }
+    } catch (err) {
+      console.error('[Users] Refresh failed:', err);
+    }
+    return users;
+  };
+
   const refreshFromSupabase = async () => {
     if (!isSupabaseConfigured()) {
-      setIsLoading(false);
-      return;
-    }
-
-    // Chỉ thực hiện tải dữ liệu kho & kiểm toán khi đã có phiên xác thực người dùng.
-    // Nếu chưa đăng nhập (vai trò vô danh 'anon'), không gửi các truy vấn nội bộ để tránh lỗi 42501 permission denied.
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData?.session?.user) {
-        setIsSyncing(false);
-        setIsLoading(false);
-        return;
-      }
-    } catch {
-      setIsSyncing(false);
       setIsLoading(false);
       return;
     }
@@ -620,12 +623,15 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       if (userRes.data && !userRes.error && userRes.data.length > 0) {
         setUsers(userRes.data);
+      } else {
+        await refreshUsers();
       }
       if (auditRes.data && !auditRes.error) {
         setAuditLogs(auditRes.data);
       }
     } catch (err: any) {
       console.warn('refreshFromSupabase error:', err);
+      await refreshUsers();
       setLoadError('Không thể tải dữ liệu từ máy chủ Supabase. Vui lòng kiểm tra kết nối mạng và bấm Thử lại.');
     } finally {
       setIsSyncing(false);
@@ -779,24 +785,29 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles' },
         (payload) => {
-          if (payload.eventType === 'UPDATE') {
+          if (payload.eventType === 'INSERT') {
             const row = payload.new;
+            const newUser = rowToUser(row);
+            setUsers((prev) => {
+              const existingIdx = prev.findIndex((u) => u.id === newUser.id);
+              if (existingIdx >= 0) {
+                const copy = [...prev];
+                copy[existingIdx] = newUser;
+                return copy;
+              }
+              return [newUser, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const row = payload.new;
+            const updatedUser = rowToUser(row);
             setUsers((prev) =>
-              prev.map((u) => {
-                if (u.id === row.id) {
-                  return {
-                    ...u,
-                    name: row.full_name || u.name,
-                    role: (row.role || u.role) as any,
-                    status: (row.status || u.status) as any,
-                    department: row.department || u.department,
-                    limits: row.limits || u.limits,
-                    permissions: row.permissions || u.permissions,
-                  };
-                }
-                return u;
-              })
+              prev.map((u) => (u.id === row.id ? updatedUser : u))
             );
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as any)?.id;
+            if (oldId) {
+              setUsers((prev) => prev.filter((u) => u.id !== oldId));
+            }
           }
         }
       )
@@ -4134,6 +4145,8 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         isLoading,
         loadError,
         refreshFromSupabase,
+        refreshUsers,
+        setUsers,
       }}
     >
       {children}
