@@ -29,7 +29,7 @@ import { EditChemicalModal } from './modals/EditChemicalModal';
 import { PrintLabelModal } from './modals/PrintLabelModal';
 
 interface Props {
-  onOpenRecordUsage: (chemicalId?: string, bottleId?: string) => void;
+  onOpenRecordUsage: (chemicalId?: string, bottleId?: string, useFullBottle?: boolean) => void;
   onOpenStockIn: (chemicalId?: string) => void;
   onOpenAddChemical: () => void;
   onOpenExcelImport?: () => void;
@@ -72,21 +72,10 @@ export const InventoryView: React.FC<Props> = ({
 
   // Quick feedback toast for 1-click usage
   const [quickUseFeedback, setQuickUseFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [showArchivedBottles, setShowArchivedBottles] = useState<boolean>(false);
 
   const handleQuickUseFullBottle = (chem: Chemical) => {
-    const res = recordUsage({
-      chemicalId: chem.id,
-      useFullBottle: true,
-      source: 'MANUAL',
-      purpose: 'Dùng hết 1 chai',
-      notes: '[Cách 1] Dùng hết 1 chai',
-    });
-    if (res.success) {
-      setQuickUseFeedback({ message: res.message, type: 'success' });
-    } else {
-      setQuickUseFeedback({ message: res.message, type: 'error' });
-    }
-    setTimeout(() => setQuickUseFeedback(null), 3500);
+    onOpenRecordUsage(chem.id, undefined, true);
   };
 
   // Chemical Detail & Edit Modals State
@@ -441,7 +430,7 @@ export const InventoryView: React.FC<Props> = ({
             </div>
           ) : (
             filteredChemicals.map((chem) => {
-              const chemBottles = getChemicalBottles(chem.id);
+              const chemBottles = getChemicalBottles(chem.id, showArchivedBottles);
               const stock = getChemicalTotalStock(chem.id);
               const stockStatus = getChemicalStockStatus(chem.id);
               const expiryStatus = getChemicalExpiryStatus(chem.id);
@@ -641,8 +630,24 @@ export const InventoryView: React.FC<Props> = ({
                   {/* Individual Bottles Visual Drawer */}
                   {isExpanded && (
                     <div className="bg-slate-50/70 border-t border-slate-200 p-4 sm:p-5 space-y-3">
-                      <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span>Danh Sách Chai/Lọ Thực Tế Của Hóa Chất Này:</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700">
+                        <div className="flex items-center gap-2">
+                          <span>Danh Sách Chai/Lọ Thực Tế Của Hóa Chất Này:</span>
+                          {bottles.filter((b) => b.chemicalId === chem.id && b.status === 'ARCHIVED').length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowArchivedBottles(!showArchivedBottles)}
+                              className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                showArchivedBottles
+                                  ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                  : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
+                              }`}
+                              title="Hiển thị hoặc ẩn các chai đã lưu trữ vào Kho Lưu Trữ (Archive)"
+                            >
+                              <span>📦 {showArchivedBottles ? 'Đang hiện' : 'Hiện'} {bottles.filter((b) => b.chemicalId === chem.id && b.status === 'ARCHIVED').length} chai lưu trữ</span>
+                            </button>
+                          )}
+                        </div>
                         {isManager && (
                           <button
                             onClick={() => onOpenStockIn(chem.id)}

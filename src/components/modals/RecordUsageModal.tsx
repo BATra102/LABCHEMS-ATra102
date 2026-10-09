@@ -482,7 +482,7 @@ export const RecordUsageModal: React.FC<Props> = ({
       setSuccessMsg(null);
       setApprovalSentMsg(null);
       setQrScanError(null);
-      if (preselectedBottleId || initialUseFullBottle) {
+      if (preselectedBottleId || preselectedChemicalId || initialUseFullBottle) {
         setSelectionMode('MANUAL');
         setIsScanningActive(false);
       } else {
@@ -491,7 +491,7 @@ export const RecordUsageModal: React.FC<Props> = ({
         setScannedBottle(null);
       }
     }
-  }, [isOpen, preselectedBottleId, initialUseFullBottle]);
+  }, [isOpen, preselectedBottleId, preselectedChemicalId, initialUseFullBottle]);
 
   // Request Manager Approval if limit exceeded
   const handleSendApproval = () => {
@@ -646,7 +646,7 @@ export const RecordUsageModal: React.FC<Props> = ({
             </button>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">
             <span>User:</span>
             <strong className="text-slate-800">{currentUser.name}</strong>
           </div>

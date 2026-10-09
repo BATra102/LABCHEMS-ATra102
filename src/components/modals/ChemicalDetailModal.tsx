@@ -545,6 +545,7 @@ export const ChemicalDetailModal: React.FC<Props> = ({
                     <option value="FULL">Còn nguyên (SEALED)</option>
                     <option value="LOW">Sắp hết (LOW)</option>
                     <option value="EMPTY">Đã hết (EMPTY)</option>
+                    <option value="ARCHIVED">Đã lưu trữ (ARCHIVED)</option>
                     <option value="EXPIRED">Hết hạn (EXPIRED)</option>
                     <option value="DISPOSED">Đã thanh lý</option>
                   </select>

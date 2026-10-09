@@ -123,7 +123,7 @@ interface LabContextType {
 
   // Calculations
   getChemicalTotalStock: (chemicalId: string) => { total: number; unit: ChemicalUnit };
-  getChemicalBottles: (chemicalId: string) => Bottle[];
+  getChemicalBottles: (chemicalId: string, includeArchived?: boolean) => Bottle[];
   getChemicalStockStatus: (chemicalId: string) => StockStatus;
   getChemicalExpiryStatus: (chemicalId: string) => ExpiryStatus;
 

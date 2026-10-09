@@ -610,7 +610,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
               </div>
 
               {/* Thông tin tài khoản & Mật khẩu cấp lại của Người quản lý */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
+              <div className="hidden p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
                 <div className="font-bold text-slate-900 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <KeyRound className="w-4 h-4 text-purple-600" />
