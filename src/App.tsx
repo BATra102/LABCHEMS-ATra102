@@ -173,9 +173,9 @@ function MainApp() {
             sessionStorage.getItem('labchem_v4_current_user_id') ||
             '';
 
-          if (storedAuth && (isSeniorManagerEmail(storedEmail) || storedEmail === 'jasminebee279@gmail.com')) {
+          if (storedAuth && (storedEmail || storedId)) {
             userEmail = storedEmail;
-            userId = storedId || '4d27e9a8-aae2-4276-adcf-1f10f3458b97';
+            userId = storedId;
           }
         }
 
@@ -198,15 +198,49 @@ function MainApp() {
           }
         } catch (_) {}
 
-        if (!profile) {
+        if (!profile && userEmail) {
           try {
             const { data: profileByEmail } = await supabase
               .from('profiles')
               .select('*')
-              .ilike('google_email', userEmail)
+              .or(`email.ilike.${userEmail},google_email.ilike.${userEmail}`)
               .maybeSingle();
             if (profileByEmail) {
               profile = profileByEmail;
+            }
+          } catch (_) {}
+        }
+
+        // Tra cứu theo username tách từ internal email (ví dụ: username@labchem.internal -> username)
+        if (!profile && userEmail.includes('@')) {
+          const usernamePrefix = userEmail.split('@')[0];
+          try {
+            const { data: profileByUsername } = await supabase
+              .from('profiles')
+              .select('*')
+              .ilike('username', usernamePrefix)
+              .maybeSingle();
+            if (profileByUsername) {
+              profile = profileByUsername;
+            }
+          } catch (_) {}
+        }
+
+        // Tra cứu từ server store nếu Supabase client chưa kịp đồng bộ RLS
+        if (!profile) {
+          try {
+            const uRes = await fetch('/api/users');
+            if (uRes.ok) {
+              const uJson = await uRes.json();
+              if (uJson.success && Array.isArray(uJson.data)) {
+                const usernamePrefix = userEmail.includes('@') ? userEmail.split('@')[0] : userEmail;
+                profile = uJson.data.find(
+                  (x: any) =>
+                    x.id === userId ||
+                    (x.email && x.email.toLowerCase() === userEmail.toLowerCase()) ||
+                    (x.username && x.username.toLowerCase() === usernamePrefix.toLowerCase())
+                );
+              }
             }
           } catch (_) {}
         }
@@ -247,7 +281,32 @@ function MainApp() {
             return;
           }
 
-          // Không tìm thấy profile và không phải quản lý cao cấp -> signOut ngay lập tức
+          // Tự động khôi phục profile tối thiểu từ Auth User metadata nếu session hợp lệ
+          if (session?.user) {
+            const meta = session.user.user_metadata || {};
+            const recoveredUsername = meta.username || (userEmail.includes('@') ? userEmail.split('@')[0] : userEmail);
+            const recoveredProfile = {
+              id: session.user.id,
+              username: recoveredUsername,
+              full_name: meta.full_name || meta.name || recoveredUsername,
+              email: userEmail,
+              google_email: userEmail,
+              role: meta.role || 'STAFF',
+              status: 'ACTIVE',
+              department: meta.department || 'Bộ môn Dược liệu & Chiết xuất',
+              must_change_password: true,
+            };
+
+            try {
+              await supabase.from('profiles').upsert(recoveredProfile, { onConflict: 'id' });
+            } catch (_) {}
+
+            profile = recoveredProfile;
+          }
+        }
+
+        // Sau khi đã thử mọi cách mà vẫn không có profile
+        if (!profile) {
           await auditService.logAccessDenied(
             userEmail,
             'Phiên đăng nhập bị hủy: Không tìm thấy hồ sơ người dùng trong bảng profiles',
@@ -312,15 +371,21 @@ function MainApp() {
 
     verifySession();
 
-    // Lắng nghe sự kiện đăng xuất từ Supabase Auth
+    // Lắng nghe sự kiện đăng xuất từ Supabase Auth (chỉ đăng xuất khi có sự kiện SIGNED_OUT tường minh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
+      if (event === 'SIGNED_OUT') {
         if (isMounted) {
           setIsAuthenticated(false);
           localStorage.removeItem('labchem_v4_is_authenticated');
           localStorage.removeItem('labchem_v4_current_user_id');
+          localStorage.removeItem('labchem_v4_current_user_email');
           sessionStorage.removeItem('labchem_v4_is_authenticated');
           sessionStorage.removeItem('labchem_v4_current_user_id');
+          sessionStorage.removeItem('labchem_v4_current_user_email');
+        }
+      } else if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+        if (isMounted) {
+          setIsAuthenticated(true);
         }
       }
     });
@@ -329,7 +394,7 @@ function MainApp() {
       isMounted = false;
       subscription?.unsubscribe();
     };
-  }, [users]);
+  }, []);
 
   // Xử lý Đăng xuất
   const handleSignOut = async () => {

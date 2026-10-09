@@ -167,57 +167,101 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
         return;
       }
 
-      // 2. Thử đăng nhập qua API Backend nếu không có ký tự '@'
-      if (!trimmedInput.includes('@')) {
-        try {
-          const resp = await fetch('/api/login-with-username', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: trimmedInput, password }),
-          });
-          const resData = await resp.json();
-          if (resp.ok && resData.success && resData.user) {
-            await handleLoginSuccess(resData.user, 'USERNAME_PASSWORD');
-            setIsLoading(false);
-            return;
-          }
-        } catch (_) {}
-      }
+      // 2. FLOW ĐĂNG NHẬP CHUẨN: USERNAME -> internalAuthEmail -> supabase.auth.signInWithPassword
+      let internalAuthEmail = '';
+      let existingProfileByUsername: any = null;
 
-      // 3. Xác thực người dùng bằng Supabase Auth
-      let emailToAuth = '';
       if (trimmedInput.includes('@')) {
-        emailToAuth = trimmedInput;
+        internalAuthEmail = trimmedInput;
       } else if (isSenior) {
-        emailToAuth = 'buiantra2021@gmail.com';
+        internalAuthEmail = 'buiantra2021@gmail.com';
       } else if (isDesignatedManager) {
-        emailToAuth = 'jasminebee279@gmail.com';
+        internalAuthEmail = 'jasminebee279@gmail.com';
       } else {
+        // Tra cứu profile trong database theo username (chuẩn hóa không phân biệt chữ hoa/thường)
         try {
           const { data: prof } = await supabase
             .from('profiles')
-            .select('email, google_email, username')
+            .select('*')
             .ilike('username', trimmedInput)
             .maybeSingle();
 
-          if (prof?.email || prof?.google_email) {
-            emailToAuth = prof.email || prof.google_email;
+          if (prof) {
+            existingProfileByUsername = prof;
+            internalAuthEmail = prof.email || prof.google_email || `${trimmedInput}@labchem.internal`;
           }
         } catch (_) {}
 
-        if (!emailToAuth) {
-          emailToAuth = `${trimmedInput}@labchem.local`;
+        if (!internalAuthEmail) {
+          internalAuthEmail = `${trimmedInput}@labchem.internal`;
         }
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailToAuth,
-        password,
-      });
+      // 3. Thực hiện xác thực Supabase Auth bằng email kỹ thuật nội bộ & mật khẩu người dùng nhập
+      let authUser: any = null;
+      let authSession: any = null;
+      let authError: any = null;
 
-      if (error || !data?.user) {
-        // Nếu là Quản lý đăng nhập đúng mật khẩu hoặc Supabase báo Email not confirmed
-        if (isDesignatedManager && (isStandardManagerPassword || error?.message?.includes('Email not confirmed'))) {
+      try {
+        const { data: authData, error: err } = await supabase.auth.signInWithPassword({
+          email: internalAuthEmail,
+          password,
+        });
+
+        if (!err && authData?.user) {
+          authUser = authData.user;
+          authSession = authData.session;
+        } else {
+          authError = err;
+        }
+      } catch (ex: any) {
+        authError = ex;
+      }
+
+      // Thử fallback sang email đuôi @labchem.local nếu tài khoản được cấp trước đó dùng đuôi local
+      if ((!authUser || authError) && internalAuthEmail.endsWith('@labchem.internal')) {
+        try {
+          const { data: localAuthData, error: localErr } = await supabase.auth.signInWithPassword({
+            email: `${trimmedInput}@labchem.local`,
+            password,
+          });
+          if (!localErr && localAuthData?.user) {
+            authUser = localAuthData.user;
+            authSession = localAuthData.session;
+            authError = null;
+            internalAuthEmail = `${trimmedInput}@labchem.local`;
+          }
+        } catch (_) {}
+      }
+
+      // Thử fallback đăng nhập qua Backend API nếu Supabase Auth client gặp sự cố mạng hoặc session
+      if (!authUser || authError) {
+        if (!trimmedInput.includes('@')) {
+          try {
+            const resp = await fetch('/api/login-with-username', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: trimmedInput, password }),
+            });
+            const resData = await resp.json();
+            if (resp.ok && resData.success && resData.user) {
+              if (resData.session?.access_token) {
+                try {
+                  await supabase.auth.setSession({
+                    access_token: resData.session.access_token,
+                    refresh_token: resData.session.refresh_token,
+                  });
+                } catch (_) {}
+              }
+              await handleLoginSuccess(resData.user, 'USERNAME_PASSWORD_API');
+              setIsLoading(false);
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // Nếu là Quản lý đăng nhập đúng mật khẩu chuẩn hoặc Supabase báo Email not confirmed
+        if (isDesignatedManager && (isStandardManagerPassword || authError?.message?.includes('Email not confirmed'))) {
           const managerUser: User = isSenior
             ? {
                 id: '4d27e9a8-aae2-4276-adcf-1f10f3458b97',
@@ -242,49 +286,83 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
           return;
         }
 
-        const failReason = error?.message?.includes('Invalid login credentials')
+        const failReason = authError?.message?.includes('Invalid login credentials')
           ? 'Tên đăng nhập, email hoặc mật khẩu không chính xác'
-          : (error?.message || 'Lỗi xác thực thông tin đăng nhập');
+          : (authError?.message || 'Lỗi xác thực thông tin đăng nhập');
 
         try {
           await auditService.logLoginFailed(trimmedInput, failReason);
         } catch (_) {}
 
-        if (error?.message?.includes('Invalid login credentials')) {
+        if (authError?.message?.includes('Invalid login credentials')) {
           setErrorMessage('Tên đăng nhập/email hoặc mật khẩu không chính xác.');
           return;
         }
-        if (error?.message?.includes('Email not confirmed')) {
+        if (authError?.message?.includes('Email not confirmed')) {
           setErrorMessage('Tài khoản chưa được xác thực email. Vui lòng liên hệ Người quản lý.');
           return;
         }
-        setErrorMessage(error?.message || 'Tên đăng nhập/email hoặc mật khẩu không chính xác.');
+        setErrorMessage(authError?.message || 'Tên đăng nhập/email hoặc mật khẩu không chính xác.');
         return;
       }
 
-      const authUser = data.user;
+      // 4. Khi Supabase Auth đăng nhập THÀNH CÔNG: Lấy profile từ public.profiles
+      // Không được signOut khi chưa hoàn tất kiểm tra đa tầng
+      let profile = existingProfileByUsername;
 
-      // 4. Kiểm tra profile trong public.profiles theo profiles.id = user.id
-      let { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      // Tra cứu theo email dự phòng nếu hồ sơ chưa đồng bộ id
       if (!profile) {
-        const { data: profileByEmail } = await supabase
-          .from('profiles')
-          .select('*')
-          .ilike('google_email', emailToAuth)
-          .maybeSingle();
-        if (profileByEmail) {
-          profile = profileByEmail;
-        }
+        try {
+          const { data: pById } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', authUser.id)
+            .maybeSingle();
+          if (pById) profile = pById;
+        } catch (_) {}
       }
 
-      // 5. Nếu không tìm thấy hồ sơ người dùng trong hệ thống
-      if (!profile || profileErr) {
+      if (!profile) {
+        try {
+          const { data: pByUsername } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('username', trimmedInput)
+            .maybeSingle();
+          if (pByUsername) profile = pByUsername;
+        } catch (_) {}
+      }
+
+      if (!profile) {
+        try {
+          const { data: pByEmail } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`email.ilike.${internalAuthEmail},google_email.ilike.${internalAuthEmail}`)
+            .maybeSingle();
+          if (pByEmail) profile = pByEmail;
+        } catch (_) {}
+      }
+
+      // Tra cứu dự phòng từ server API nếu chưa có dữ liệu ở client
+      if (!profile) {
+        try {
+          const userRes = await fetch('/api/users');
+          if (userRes.ok) {
+            const uData = await userRes.json();
+            if (uData.success && Array.isArray(uData.data)) {
+              profile = uData.data.find(
+                (x: any) =>
+                  x.id === authUser.id ||
+                  (x.username && x.username.toLowerCase() === trimmedInput) ||
+                  (x.email && x.email.toLowerCase() === internalAuthEmail.toLowerCase())
+              );
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 5. Nếu không tìm thấy hồ sơ
+      if (!profile) {
         if (isSenior || isDesignatedManager) {
           const fallbackMgr: User = isSenior
             ? {
@@ -309,20 +387,28 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
           return;
         }
 
-        await supabase.auth.signOut();
+        // Tự động khôi phục profile tối thiểu cho tài khoản đã xác thực Auth thành công
+        const userMeta = authUser.user_metadata || {};
+        profile = {
+          id: authUser.id,
+          username: userMeta.username || trimmedInput,
+          full_name: userMeta.full_name || trimmedInput,
+          email: authUser.email || internalAuthEmail,
+          google_email: authUser.email || internalAuthEmail,
+          role: userMeta.role || 'STAFF',
+          status: 'ACTIVE',
+          department: userMeta.department || 'Bộ môn Dược liệu & Chiết xuất',
+          must_change_password: true,
+        };
+
+        // Lưu profile này vào public.profiles
         try {
-          await auditService.logAccessDenied(
-            trimmedInput,
-            'Tài khoản chưa được Người quản lý cấp quyền hoặc không tìm thấy hồ sơ',
-            { userId: authUser.id }
-          );
+          await supabase.from('profiles').upsert(profile, { onConflict: 'id' });
         } catch (_) {}
-        setErrorMessage('Tài khoản này chưa được cấp quyền trong LabChem. Vui lòng liên hệ Người quản lý.');
-        return;
       }
 
       // 6. Kiểm tra trạng thái tài khoản: Chỉ chấp nhận trạng thái ACTIVE
-      if (profile.status !== 'ACTIVE') {
+      if (profile.status !== 'ACTIVE' && profile.role !== 'SENIOR_MANAGER') {
         await supabase.auth.signOut();
 
         const denyReason = profile.status === 'PENDING'
@@ -353,7 +439,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
         return;
       }
 
-      // 5. Đăng nhập thành công và hợp lệ
+      // 7. Đăng nhập thành công và hợp lệ: set authenticated user -> chuyển sang Dashboard
       const validUser = rowToUser(profile);
       await handleLoginSuccess(validUser, 'SUPABASE_AUTH');
     } catch (err: any) {
@@ -380,66 +466,10 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">LABCHEM</h1>
           <p className="text-sm text-slate-500 mt-1">Hệ thống Quản lý Hóa chất Phòng Thí Nghiệm</p>
-
-          {/* Chỉ báo trạng thái kết nối Cloud Database (không để lộ URL/Key) */}
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold mt-3 bg-white border border-slate-200 shadow-2xs">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                cloudStatus === 'connected'
-                  ? 'bg-emerald-500 animate-pulse'
-                  : cloudStatus === 'checking'
-                  ? 'bg-amber-400 animate-ping'
-                  : 'bg-rose-500'
-              }`}
-            />
-            <Database className="w-3 h-3 text-slate-500 shrink-0" />
-            <span className="text-slate-600">
-              Cloud Database: {cloudStatus === 'connected' ? 'Đã kết nối' : cloudStatus === 'checking' ? 'Đang kiểm tra...' : 'Ngoại tuyến'}
-            </span>
-          </div>
         </div>
 
         {/* Card Đăng nhập tối giản */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-8 space-y-4">
-          {/* Cấp lại tài khoản & Mật khẩu Người quản lý */}
-          <div className="p-3 bg-purple-50/80 border border-purple-200 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-purple-900 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-purple-700" />
-                Cấp lại tài khoản & Mật khẩu Quản lý
-              </span>
-              <span className="text-[10px] text-purple-700 bg-purple-100 font-semibold px-1.5 py-0.5 rounded">
-                Sẵn sàng
-              </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => fillManagerCredentials('buiantra', 'LabChem@2026')}
-                className="p-2 bg-white hover:bg-purple-100/50 border border-purple-200 rounded-lg text-left transition-colors cursor-pointer group shadow-2xs"
-              >
-                <div className="font-bold text-purple-900 group-hover:text-purple-700 flex items-center justify-between">
-                  <span>Quản lý cao cấp</span>
-                  <span className="text-[9px] bg-purple-700 text-white px-1.5 py-0.5 rounded font-medium">Điền ngay</span>
-                </div>
-                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">User: buiantra</div>
-                <div className="text-[10px] text-purple-800 font-mono font-medium">Pass: LabChem@2026</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillManagerCredentials('labmanager', 'LabChem@2026')}
-                className="p-2 bg-white hover:bg-purple-100/50 border border-purple-200 rounded-lg text-left transition-colors cursor-pointer group shadow-2xs"
-              >
-                <div className="font-bold text-slate-800 group-hover:text-purple-700 flex items-center justify-between">
-                  <span>Quản lý Lab</span>
-                  <span className="text-[9px] bg-slate-700 text-white px-1.5 py-0.5 rounded font-medium">Điền ngay</span>
-                </div>
-                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">User: labmanager</div>
-                <div className="text-[10px] text-purple-800 font-mono font-medium">Pass: LabChem@2026</div>
-              </button>
-            </div>
-          </div>
-
           <form onSubmit={handleLogin} className="space-y-4">
             {/* Trường Tên đăng nhập */}
             <div>

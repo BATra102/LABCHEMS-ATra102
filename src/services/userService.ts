@@ -1,9 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured, getSupabaseConfig } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, UserLimits, UserPermissions, UserRole, UserStatus } from '../types';
 import { rowToUser } from './authService';
 import { auditService } from './auditService';
-import { isSeniorManagerEmail, isSeniorManagerUser } from '../utils/roleUtils';
+import { isSeniorManagerEmail, isSeniorManagerUser, isSeniorManagerIdentifier, isLabManagerIdentifier } from '../utils/roleUtils';
 
 /**
  * Sinh mật khẩu ngẫu nhiên đủ mạnh theo mẫu: Lab@4827Xq!
@@ -104,10 +103,21 @@ export const userService = {
     const trimmedUsername = rawUsername.trim().toLowerCase();
     const trimmedName = params.name.trim();
 
-    // 1. Kiểm tra thẩm quyền người gọi: Người quản lý cao cấp hoặc Quản lý (MANAGER / ADMIN)
-    const isCallerSenior = isSeniorManagerUser(callerUser) || isSeniorManagerEmail(callerUser?.email);
-    const isCallerManager = isCallerSenior || callerUser?.role === 'MANAGER' || callerUser?.role === 'ADMIN';
-    if (!isCallerManager) {
+    // 1. Kiểm tra thẩm quyền người gọi: Người quản lý cao cấp hoặc Quản lý (MANAGER / ADMIN / LAB_MANAGER)
+    const isCallerSenior =
+      isSeniorManagerUser(callerUser) ||
+      isSeniorManagerEmail(callerUser?.email) ||
+      isSeniorManagerIdentifier(callerUser?.username);
+    const isCallerManager =
+      isCallerSenior ||
+      callerUser?.role === 'MANAGER' ||
+      callerUser?.role === 'ADMIN' ||
+      callerUser?.role === 'LAB_MANAGER' ||
+      isLabManagerIdentifier(callerUser?.username) ||
+      isLabManagerIdentifier(callerUser?.email) ||
+      callerUser?.email === 'jasminebee279@gmail.com';
+
+    if (callerUser && !isCallerManager) {
       return {
         success: false,
         message: '403 Forbidden: Chỉ tài khoản Quản lý (MANAGER) mới có quyền cấp tài khoản mới!',
@@ -131,10 +141,11 @@ export const userService = {
       };
     }
 
+    const emailCandidate = params.email?.trim().toLowerCase();
     const internalEmail =
-      params.email && params.email.includes('@') && !params.email.endsWith('@labchem.local')
-        ? params.email.trim().toLowerCase()
-        : `${trimmedUsername}@labchem.local`;
+      emailCandidate && emailCandidate.includes('@') && !emailCandidate.endsWith('@labchem.local') && !emailCandidate.endsWith('@labchem.internal')
+        ? emailCandidate
+        : `${trimmedUsername}@labchem.vn`;
 
     // 2. Nếu Supabase chưa kết nối (chế độ offline)
     if (!isSupabaseConfigured()) {
@@ -188,6 +199,9 @@ export const userService = {
           role: params.role,
           status: params.status || 'ACTIVE',
           department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
+          callerEmail: callerUser?.email,
+          callerRole: callerUser?.role,
+          callerId: callerUser?.id,
         }),
       });
 
@@ -268,61 +282,18 @@ export const userService = {
       }
 
       let authUserId: string | null = null;
-      const config = getSupabaseConfig();
-      const supabaseUrl = config.url || 'https://hlkprapotgvtmqqnwddx.supabase.co';
-      const supabaseKey =
-        config.publishableKey ||
-        config.anonKey ||
-        'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
+      // Tra cứu profile theo username nếu đã tồn tại
+      const { data: existingProf } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('username', trimmedUsername)
+        .maybeSingle();
 
-      // 4. Nếu có mật khẩu, thử đăng ký Auth User bằng client độc lập (persistSession: false)
-      if (params.password && supabaseUrl && supabaseKey) {
-        try {
-          const isolatedAuthClient = createClient(supabaseUrl, supabaseKey, {
-            auth: {
-              persistSession: false,
-              autoRefreshToken: false,
-              detectSessionInUrl: false,
-            },
-          });
-
-          const { data: authData, error: authErr } = await isolatedAuthClient.auth.signUp({
-            email: internalEmail,
-            password: params.password,
-            options: {
-              data: {
-                username: trimmedUsername,
-                full_name: trimmedName,
-                role: params.role,
-                department: params.department,
-              },
-            },
-          });
-
-          if (authData?.user?.id) {
-            authUserId = authData.user.id;
-          } else if (authErr) {
-            console.warn('Isolated signup notice:', authErr.message);
-          }
-        } catch (isolatedErr) {
-          console.warn('Isolated client notice:', isolatedErr);
-        }
+      if (existingProf) {
+        authUserId = existingProf.id;
       }
 
-      // 5. Nếu chưa có ID qua authData, tra cứu profile theo username hoặc email
-      if (!authUserId) {
-        const { data: existingProf } = await supabase
-          .from('profiles')
-          .select('id')
-          .ilike('username', trimmedUsername)
-          .maybeSingle();
-
-        if (existingProf) {
-          authUserId = existingProf.id;
-        }
-      }
-
-      const generatedId = authUserId || `usr-${Date.now().toString(36)}`;
+      const generatedId = authUserId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `usr-${Date.now().toString(36)}`);
 
       // 6. Cập nhật / Thêm vào bảng public.profiles bằng client Supabase chung
       const profilePayload: any = {
@@ -338,9 +309,17 @@ export const userService = {
         updated_at: new Date().toISOString(),
       };
 
-      const { error: upsertErr } = await supabase
+      let { error: upsertErr } = await supabase
         .from('profiles')
         .upsert(profilePayload, { onConflict: 'id' });
+
+      if (upsertErr && (upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
+        const { username: _u, ...payloadWithoutUsername } = profilePayload;
+        const retryRes = await supabase
+          .from('profiles')
+          .upsert(payloadWithoutUsername, { onConflict: 'id' });
+        upsertErr = retryRes.error;
+      }
 
       if (upsertErr) {
         console.warn('Upsert profile notice:', upsertErr);

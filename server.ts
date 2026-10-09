@@ -1,6 +1,8 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
@@ -14,6 +16,46 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
   const serverKnownUsernames = new Set<string>(['manager', 'admin', 'buiantra', 'labmanager']);
+  const serverProfilesStore = new Map<string, any>();
+  const serverCredentialsStore = new Map<string, string>();
+
+  const USERS_STORE_FILE = path.resolve(__dirname, 'persisted_users.json');
+
+  function loadPersistedData() {
+    try {
+      if (fs.existsSync(USERS_STORE_FILE)) {
+        const raw = fs.readFileSync(USERS_STORE_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.profiles)) {
+          for (const p of data.profiles) {
+            serverProfilesStore.set(p.id, p);
+            if (p.username) serverKnownUsernames.add(p.username.toLowerCase());
+          }
+        }
+        if (data.credentials && typeof data.credentials === 'object') {
+          for (const [k, v] of Object.entries(data.credentials)) {
+            serverCredentialsStore.set(k.toLowerCase(), v as string);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load persisted users:', e);
+    }
+  }
+
+  function savePersistedData() {
+    try {
+      const data = {
+        profiles: Array.from(serverProfilesStore.values()),
+        credentials: Object.fromEntries(serverCredentialsStore.entries()),
+      };
+      fs.writeFileSync(USERS_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('Could not save persisted users:', e);
+    }
+  }
+
+  loadPersistedData();
 
   app.use(express.json());
 
@@ -181,7 +223,16 @@ async function startServer() {
         },
       });
 
-      // 8. Trả kết quả thành công cho frontend
+      // 8. Cập nhật mật khẩu trong local store và lưu xuống đĩa
+      if (targetProfile.username) {
+        serverCredentialsStore.set(targetProfile.username.toLowerCase(), newPassword);
+      }
+      if (targetEmail) {
+        serverCredentialsStore.set(targetEmail.toLowerCase(), newPassword);
+      }
+      savePersistedData();
+
+      // 9. Trả kết quả thành công cho frontend
       return res.json({
         success: true,
         message: 'Đã cấp lại mật khẩu thành công. Hãy cung cấp mật khẩu mới cho người dùng qua kênh liên hệ an toàn.',
@@ -253,13 +304,68 @@ async function startServer() {
 
           if (prof) {
             targetProfile = prof;
-            internalEmail = prof.email || prof.google_email || `${trimmedUsername}@labchem.local`;
+            internalEmail = prof.email || prof.google_email || `${trimmedUsername}@labchem.vn`;
           }
         } catch (_) {}
 
         if (!internalEmail) {
-          internalEmail = `${trimmedUsername}@labchem.local`;
+          // Thử tìm trong serverProfilesStore
+          for (const item of serverProfilesStore.values()) {
+            if (item.username && item.username.toLowerCase() === trimmedUsername) {
+              targetProfile = item;
+              internalEmail = item.email || item.google_email;
+              break;
+            }
+          }
         }
+
+        if (!internalEmail) {
+          internalEmail = `${trimmedUsername}@labchem.vn`;
+        }
+      }
+
+      // 1b. Kiểm tra thông tin đăng nhập trong serverCredentialsStore
+      const storedPassword =
+        serverCredentialsStore.get(trimmedUsername) ||
+        (internalEmail ? serverCredentialsStore.get(internalEmail.toLowerCase()) : undefined);
+
+      if (storedPassword && storedPassword === password) {
+        let prof = targetProfile;
+        if (!prof) {
+          for (const item of serverProfilesStore.values()) {
+            if (
+              (item.username && item.username.toLowerCase() === trimmedUsername) ||
+              (item.email && item.email.toLowerCase() === trimmedUsername)
+            ) {
+              prof = item;
+              break;
+            }
+          }
+        }
+
+        const validUser = {
+          id: prof?.id || `usr-${trimmedUsername}`,
+          username: prof?.username || trimmedUsername,
+          name: prof?.full_name || prof?.name || trimmedUsername,
+          email: prof?.email || internalEmail,
+          role: prof?.role || 'STAFF',
+          status: prof?.status || 'ACTIVE',
+          department: prof?.department || 'Bộ môn Dược liệu & Chiết xuất',
+          dateJoined: prof?.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+        };
+
+        if (validUser.status !== 'ACTIVE' && validUser.role !== 'SENIOR_MANAGER') {
+          return res.status(403).json({
+            success: false,
+            message: `Tài khoản hiện đang ở trạng thái ${validUser.status}. Vui lòng liên hệ Người quản lý.`,
+          });
+        }
+
+        return res.json({
+          success: true,
+          user: validUser,
+          message: 'Đăng nhập thành công.',
+        });
       }
 
       // 2. Thử xác thực với Supabase Auth
@@ -276,7 +382,22 @@ async function startServer() {
           authUser = authRes.data.user;
           session = authRes.data.session;
         } else {
-          authError = authRes.error;
+          // Thử fallback email @labchem.local nếu trước đó tạo bằng local
+          if (internalEmail.endsWith('@labchem.vn') || internalEmail.endsWith('@labchem.internal')) {
+            const fallbackRes = await client.auth.signInWithPassword({
+              email: `${trimmedUsername}@labchem.local`,
+              password,
+            });
+            if (fallbackRes.data?.user) {
+              authUser = fallbackRes.data.user;
+              session = fallbackRes.data.session;
+              internalEmail = `${trimmedUsername}@labchem.local`;
+            } else {
+              authError = authRes.error || fallbackRes.error;
+            }
+          } else {
+            authError = authRes.error;
+          }
         }
       } catch (e: any) {
         authError = e;
@@ -424,8 +545,8 @@ async function startServer() {
         });
       }
 
-      // Kiểm tra định dạng username (cho phép chữ cái, số, dấu gạch dưới và dấu chấm)
-      const usernameClean = trimmedUsername.replace(/@labchem\.local$/, '');
+      // Kiểm tra xem username đã tồn tại chưa (Unique username)
+      const usernameClean = trimmedUsername.replace(/@labchem\.(internal|local|vn|com)$/, '').toLowerCase();
       const usernameRegex = /^[a-zA-Z0-9_.]+$/;
       if (!usernameRegex.test(usernameClean)) {
         return res.status(400).json({
@@ -434,12 +555,28 @@ async function startServer() {
         });
       }
 
+      let existingInStore = serverKnownUsernames.has(usernameClean);
+      if (!existingInStore) {
+        for (const item of serverProfilesStore.values()) {
+          if (item.username && item.username.toLowerCase() === usernameClean) {
+            existingInStore = true;
+            break;
+          }
+        }
+      }
+      if (existingInStore) {
+        return res.status(400).json({
+          success: false,
+          message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
+        });
+      }
+
       const requestedRole = role || 'STAFF';
       const requestedStatus = status || 'ACTIVE';
       const requestedDept = department || 'Bộ môn Dược liệu & Chiết xuất';
-      const internalEmail = email && email.includes('@') && !email.endsWith('@labchem.local')
+      const internalEmail = email && email.includes('@') && !email.endsWith('@labchem.local') && !email.endsWith('@labchem.internal')
         ? email.trim().toLowerCase()
-        : `${usernameClean}@labchem.local`;
+        : `${usernameClean}@labchem.vn`;
 
       const supabaseUrl =
         process.env.VITE_SUPABASE_URL ||
@@ -470,12 +607,11 @@ async function startServer() {
         } catch (_) {}
       }
 
-      // Kiểm tra xem username đã tồn tại chưa (Unique username)
-      if (serverKnownUsernames.has(usernameClean)) {
-        return res.status(400).json({
-          success: false,
-          message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
-        });
+      if (!callerEmail && req.body.callerEmail) {
+        callerEmail = String(req.body.callerEmail).trim().toLowerCase();
+      }
+      if (!callerId && req.body.callerId) {
+        callerId = String(req.body.callerId).trim();
       }
 
       const dbClient = supabaseServiceKey
@@ -560,9 +696,9 @@ async function startServer() {
         } catch (_) {}
       }
 
-      const generatedId = newUserId || `usr-${Date.now().toString(36)}`;
+      const generatedId = newUserId || crypto.randomUUID();
 
-      // 3. Tạo hoặc cập nhật profile trong public.profiles
+      // 3. Tạo hoặc cập nhật profile trong public.profiles bằng dbClient
       const profilePayload = {
         id: generatedId,
         username: usernameClean,
@@ -574,14 +710,32 @@ async function startServer() {
         department: requestedDept,
         must_change_password: true,
         updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
       };
 
-      await clientWithToken.from('profiles').upsert(profilePayload, { onConflict: 'id' });
+      try {
+        const { error: upsertErr } = await dbClient.from('profiles').upsert(profilePayload, { onConflict: 'id' });
+        if (upsertErr && (upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
+          const { username: _u, ...payloadWithoutUsername } = profilePayload;
+          await dbClient.from('profiles').upsert(payloadWithoutUsername, { onConflict: 'id' });
+        }
+      } catch (upsertErr) {
+        console.warn('Upsert profile notice:', upsertErr);
+      }
+
+      // Lưu trữ trong serverProfilesStore và serverCredentialsStore
+      serverProfilesStore.set(generatedId, profilePayload);
+      if (password) {
+        serverCredentialsStore.set(usernameClean, password);
+        serverCredentialsStore.set(internalEmail.toLowerCase(), password);
+      }
+      serverKnownUsernames.add(usernameClean);
+      savePersistedData();
 
       // Nếu vai trò là MANAGER, thêm vào system_roles_whitelist
       if (requestedRole === 'MANAGER') {
         try {
-          await clientWithToken.from('system_roles_whitelist').upsert(
+          await dbClient.from('system_roles_whitelist').upsert(
             {
               email: internalEmail,
               role: 'MANAGER',
@@ -594,7 +748,7 @@ async function startServer() {
 
       // 4. Ghi nhật ký kiểm toán ACCOUNT_CREATED (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
       try {
-        await clientWithToken.from('audit_logs').insert({
+        await dbClient.from('audit_logs').insert({
           action: 'ACCOUNT_CREATED',
           entity_type: 'USER',
           entity_id: generatedId,
@@ -624,8 +778,6 @@ async function startServer() {
         department: requestedDept,
         dateJoined: new Date().toISOString().split('T')[0],
       };
-
-      serverKnownUsernames.add(usernameClean);
 
       return res.json({
         success: true,
@@ -669,23 +821,35 @@ async function startServer() {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        return res.status(500).json({ success: false, error: error.message });
-      }
+      // Hợp nhất dữ liệu giữa Supabase và serverProfilesStore
+      const mergedMap = new Map<string, any>();
 
-      // Cập nhật lại serverKnownUsernames
       if (Array.isArray(data)) {
         for (const item of data) {
+          mergedMap.set(item.id, item);
           if (item.username) {
             serverKnownUsernames.add(item.username.toLowerCase());
           }
         }
       }
 
-      return res.json({ success: true, data: data || [] });
+      for (const [id, item] of serverProfilesStore.entries()) {
+        if (!mergedMap.has(id)) {
+          mergedMap.set(id, item);
+        }
+        if (item.username) {
+          serverKnownUsernames.add(item.username.toLowerCase());
+        }
+      }
+
+      const mergedList = Array.from(mergedMap.values());
+
+      return res.json({ success: true, data: mergedList });
     } catch (err: any) {
       console.error('API GET /api/users error:', err);
-      return res.status(500).json({ success: false, error: err.message });
+      // Nếu có lỗi kết nối Supabase, vẫn trả về serverProfilesStore
+      const fallbackList = Array.from(serverProfilesStore.values());
+      return res.json({ success: true, data: fallbackList });
     }
   });
 

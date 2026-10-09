@@ -4,7 +4,8 @@ import { isSeniorManagerEmail } from '../utils/roleUtils';
 
 export const rowToUser = (row: any): User => {
   const isSenior = row.is_senior_manager || isSeniorManagerEmail(row.google_email);
-  const role: UserRole = isSenior ? 'SENIOR_MANAGER' : ((row.role || 'USER') as UserRole);
+  const rawRole = (row.role ? String(row.role).toUpperCase() : 'USER') as UserRole;
+  const role: UserRole = isSenior ? 'SENIOR_MANAGER' : rawRole;
   const isManagerLike = role === 'SENIOR_MANAGER' || role === 'MANAGER' || role === 'ADMIN' || role === 'LAB_MANAGER';
   const isStaff = role === 'STAFF';
   const isViewer = role === 'VIEWER';
@@ -21,9 +22,9 @@ export const rowToUser = (row: any): User => {
         ? row.google_email.split('@')[0]
         : ''),
     name: row.full_name || (isSenior ? 'Người quản lý cao cấp' : 'Người dùng Lab'),
-    email: row.google_email || row.email || '',
+    email: row.google_email || row.email || (row.username ? `${row.username}@labchem.internal` : ''),
     role,
-    status: (row.status || 'ACTIVE') as UserStatus,
+    status: ((row.status ? String(row.status).toUpperCase() : 'ACTIVE') as UserStatus),
     department: row.department || 'Bộ môn Dược liệu & Chiết xuất',
     picture: row.avatar_url || undefined,
     position: row.job_title || undefined,
@@ -148,14 +149,35 @@ export const authService = {
       } catch (_) {}
 
       if (!internalEmail) {
-        internalEmail = `${trimmed}@labchem.local`;
+        internalEmail = `${trimmed}@labchem.internal`;
       }
     }
 
-    return supabase.auth.signInWithPassword({
-      email: internalEmail,
-      password,
-    });
+    try {
+      const res = await supabase.auth.signInWithPassword({
+        email: internalEmail,
+        password,
+      });
+      if (res.data?.user) return res;
+      if (internalEmail.endsWith('@labchem.internal')) {
+        const fallbackRes = await supabase.auth.signInWithPassword({
+          email: `${trimmed}@labchem.local`,
+          password,
+        });
+        if (fallbackRes.data?.user) return fallbackRes;
+      }
+      return res;
+    } catch (authEx) {
+      if (internalEmail.endsWith('@labchem.internal')) {
+        try {
+          return await supabase.auth.signInWithPassword({
+            email: `${trimmed}@labchem.local`,
+            password,
+          });
+        } catch (_) {}
+      }
+      throw authEx;
+    }
   },
 
   async signInWithPassword(email: string, password: string) {
@@ -233,40 +255,50 @@ export const authService = {
   },
 
   async fetchProfiles(): Promise<{ data: User[] | null; error: any }> {
-    if (!isSupabaseConfigured()) {
-      return { data: null, error: new Error('Supabase chưa cấu hình') };
-    }
-
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[Users] Refresh failed from Supabase client:', error);
-        throw error;
-      }
-      const formatted: User[] = (data || []).map(rowToUser);
-      return { data: formatted, error: null };
-    } catch (err: any) {
-      // Dự phòng gọi backend API /api/users nếu client gặp sự cố RLS hoặc phân quyền
+      let serverUsers: User[] = [];
       try {
         const res = await fetch('/api/users');
         if (res.ok) {
           const json = await res.json();
           if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-            const formatted: User[] = json.data.map(rowToUser);
-            return { data: formatted, error: null };
+            serverUsers = json.data.map(rowToUser);
           }
         }
       } catch (_) {}
 
-      if (err?.code !== '42501') {
-        console.error('[Users] authService.fetchProfiles error:', err);
-      } else {
-        console.warn('authService.fetchProfiles (permission denied or unauthenticated):', err.message);
+      let supabaseUsers: User[] = [];
+      if (isSupabaseConfigured()) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (!error && Array.isArray(data)) {
+            supabaseUsers = data.map(rowToUser);
+          }
+        } catch (_) {}
       }
+
+      // Hợp nhất dữ liệu người dùng, loại bỏ trùng lặp theo ID và Username
+      const map = new Map<string, User>();
+      for (const u of serverUsers) {
+        map.set(u.id, u);
+        if (u.username) map.set(`u:${u.username.toLowerCase()}`, u);
+      }
+      for (const u of supabaseUsers) {
+        map.set(u.id, u);
+        if (u.username) map.set(`u:${u.username.toLowerCase()}`, u);
+      }
+
+      const combined = Array.from(new Set(Array.from(map.values())));
+      if (combined.length > 0) {
+        return { data: combined, error: null };
+      }
+      return { data: [], error: null };
+    } catch (err: any) {
+      console.error('[Users] authService.fetchProfiles error:', err);
       return { data: null, error: err };
     }
   },

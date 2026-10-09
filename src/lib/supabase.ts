@@ -24,28 +24,15 @@ export const getSupabaseConfig = () => {
   };
 };
 
-// Storage adapter an toàn cho Supabase Auth hỗ trợ "Ghi nhớ đăng nhập trên thiết bị này"
+// Storage adapter bảo mật cho Supabase Auth bảo đảm persistSession: true tuyệt đối
 export const authStorageAdapter = {
   getItem: (key: string): string | null => {
     if (typeof window === 'undefined') return null;
-    const isRemembered = localStorage.getItem('labchem_remember_me') !== 'false';
-    const sessionVal = sessionStorage.getItem(key);
-    if (sessionVal) return sessionVal;
-    if (isRemembered) {
-      return localStorage.getItem(key);
-    }
-    return null;
+    return localStorage.getItem(key) || sessionStorage.getItem(key);
   },
   setItem: (key: string, value: string): void => {
     if (typeof window === 'undefined') return;
-    const isRemembered = localStorage.getItem('labchem_remember_me') !== 'false';
-    if (isRemembered) {
-      localStorage.setItem(key, value);
-      sessionStorage.removeItem(key);
-    } else {
-      sessionStorage.setItem(key, value);
-      localStorage.removeItem(key);
-    }
+    localStorage.setItem(key, value);
   },
   removeItem: (key: string): void => {
     if (typeof window === 'undefined') return;

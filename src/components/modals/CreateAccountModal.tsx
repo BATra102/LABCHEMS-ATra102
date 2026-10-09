@@ -32,7 +32,7 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({
   refreshUsers,
   onSuccess,
 }) => {
-  const { currentUser, refreshUsers: contextRefreshUsers } = useLab();
+  const { currentUser, refreshUsers: contextRefreshUsers, setUsers } = useLab();
 
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
@@ -138,22 +138,35 @@ export const CreateAccountModal: React.FC<CreateAccountModalProps> = ({
         return;
       }
 
+      const createdUser = res.user;
+
       // 2. BẮT BUỘC: Refresh toàn bộ dữ liệu Users từ Supabase trước khi kết thúc flow
+      let refreshedUsers: User[] = [];
       if (refreshUsers) {
-        await refreshUsers();
+        refreshedUsers = (await refreshUsers()) || [];
       } else if (contextRefreshUsers) {
-        await contextRefreshUsers();
+        refreshedUsers = (await contextRefreshUsers()) || [];
       }
 
-      // 3. Đóng modal
-      onClose();
+      // Đảm bảo user mới luôn xuất hiện ngay lập tức trong bảng dữ liệu
+      const existsInRefreshed = refreshedUsers.some(
+        (u) =>
+          u.id === createdUser.id ||
+          (u.username && u.username.toLowerCase() === createdUser.username?.toLowerCase())
+      );
+      if (!existsInRefreshed) {
+        setUsers((prev) => [createdUser, ...prev.filter((p) => p.id !== createdUser.id)]);
+      }
 
-      // 4. Reset form
-      resetForm();
+      // 3. Chuyển sang màn hình thành công (hiển thị thông tin & mật khẩu tạm thời để sao chép)
+      setCreatedResult({
+        user: createdUser,
+        tempPassword: password,
+      });
 
-      // 5. Hiển thị thông báo toast thành công
+      // 4. Hiển thị thông báo toast thành công
       if (onSuccess) {
-        await onSuccess(res.user);
+        await onSuccess(createdUser);
       }
     } catch (err: any) {
       console.error('Error creating account:', err);

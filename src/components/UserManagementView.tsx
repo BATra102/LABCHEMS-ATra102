@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLab } from '../context/LabContext';
 import { User, UserRole, UserStatus } from '../types';
 import { supabase } from '../lib/supabase';
-import { rowToUser } from '../services/authService';
+import { rowToUser, authService } from '../services/authService';
 import {
   Users,
   UserCheck,
@@ -28,6 +28,7 @@ import {
   Edit,
   Building,
   KeyRound,
+  Sparkles,
 } from 'lucide-react';
 import { UserLimitsModal } from './modals/UserLimitsModal';
 import { DeleteManagerModal } from './modals/DeleteManagerModal';
@@ -63,32 +64,21 @@ export const UserManagementView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | UserStatus>('ALL');
   const [departmentFilter, setDepartmentFilter] = useState<'ALL' | string>('ALL');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newlyCreatedUserId, setNewlyCreatedUserId] = useState<string | null>(null);
 
   /**
-   * Tải lại danh sách Users mới nhất trực tiếp từ bảng profiles trong Supabase
+   * Tải lại danh sách Users mới nhất trực tiếp từ cơ sở dữ liệu Supabase & Server
    */
   const refreshUsers = async (): Promise<User[]> => {
     setIsRefreshing(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('[Users] Refresh failed:', error);
-        const fallbackUsers = await contextRefreshUsers();
-        return fallbackUsers;
+      const res = await authService.fetchProfiles();
+      if (res.data && res.data.length > 0) {
+        setUsers(res.data);
+        return res.data;
       }
-
-      if (data && data.length > 0) {
-        const formatted = data.map(rowToUser);
-        setUsers(formatted);
-        return formatted;
-      } else {
-        const fallbackUsers = await contextRefreshUsers();
-        return fallbackUsers;
-      }
+      const fallbackUsers = await contextRefreshUsers();
+      return fallbackUsers;
     } catch (err) {
       console.error('[Users] Refresh failed:', err);
       const fallbackUsers = await contextRefreshUsers();
@@ -610,7 +600,16 @@ export const UserManagementView: React.FC = () => {
                       (isTargetManager ? u.status === 'DEACTIVATED' : perm.allowed);
 
                     return (
-                      <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isCurrent ? 'bg-purple-50/20' : ''}`}>
+                      <tr
+                        key={u.id}
+                        className={`hover:bg-slate-50/70 transition-colors ${
+                          isCurrent ? 'bg-purple-50/20' : ''
+                        } ${
+                          u.id === newlyCreatedUserId
+                            ? 'bg-purple-50/90 ring-2 ring-purple-400/80'
+                            : ''
+                        }`}
+                      >
                         {/* THÀNH VIÊN */}
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2.5">
@@ -623,6 +622,12 @@ export const UserManagementView: React.FC = () => {
                                 {isCurrent && (
                                   <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded text-[9px] font-bold">
                                     Bạn
+                                  </span>
+                                )}
+                                {u.id === newlyCreatedUserId && (
+                                  <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded text-[9px] font-bold flex items-center gap-0.5 animate-pulse">
+                                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                    <span>Mới cấp</span>
                                   </span>
                                 )}
                               </div>
@@ -651,12 +656,18 @@ export const UserManagementView: React.FC = () => {
                           {u.username ? (
                             <div className="flex flex-col">
                               <span className="font-bold text-purple-700">@{u.username}</span>
-                              {u.email && !u.email.endsWith('@labchem.local') && (
-                                <span className="text-[10px] text-slate-400 font-sans">{u.email}</span>
-                              )}
+                              {u.email &&
+                                !u.email.endsWith('@labchem.local') &&
+                                !u.email.endsWith('@labchem.internal') && (
+                                  <span className="text-[10px] text-slate-400 font-sans">{u.email}</span>
+                                )}
                             </div>
                           ) : (
-                            <span>{u.email}</span>
+                            <span>
+                              {u.email?.endsWith('@labchem.internal')
+                                ? `@${u.email.split('@')[0]}`
+                                : u.email}
+                            </span>
                           )}
                         </td>
 
@@ -953,9 +964,15 @@ export const UserManagementView: React.FC = () => {
         onClose={() => setIsProvisionModalOpen(false)}
         refreshUsers={refreshUsers}
         onSuccess={async (newUser) => {
+          setNewlyCreatedUserId(newUser.id);
+          setStatusFilter('ALL');
+          setRoleFilter('ALL');
+          setDepartmentFilter('ALL');
+          setSearchTerm('');
           showMsg(
-            `✓ Cấp tài khoản thành công cho "${newUser.name}" (Tên đăng nhập: ${newUser.username || newUser.email})!`
+            `✓ Cấp tài khoản thành công cho "${newUser.name}" (Tên đăng nhập: @${newUser.username || newUser.email})!`
           );
+          setTimeout(() => setNewlyCreatedUserId(null), 8000);
         }}
       />
 

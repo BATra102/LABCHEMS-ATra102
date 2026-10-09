@@ -142,7 +142,7 @@ serve(async (req) => {
     const requestedRole = role || 'STAFF';
     const requestedStatus = status || 'ACTIVE';
     const requestedDept = department || 'Bộ môn Dược liệu & Chiết xuất';
-    const internalEmail = `${usernameClean}@labchem.local`;
+    const internalEmail = `${usernameClean}@labchem.internal`;
     const defaultPassword = password || 'LabChem@2026';
 
     // 4. Tạo User qua Supabase Auth Admin API phía server
