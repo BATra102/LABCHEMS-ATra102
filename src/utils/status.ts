@@ -55,12 +55,12 @@ export function calculateBottleStatus(
   referenceDateStr: string = '2026-10-01',
   openedDate?: string
 ): BottleStatus {
+  if (currentVolume <= 0.0001) {
+    return 'EMPTY';
+  }
   const days = getDaysRemaining(expiryDateStr, referenceDateStr);
   if (days <= 0) {
     return 'EXPIRED';
-  }
-  if (currentVolume <= 0.0001) {
-    return 'EMPTY';
   }
   const ratio = initialVolume > 0 ? currentVolume / initialVolume : 0;
   if (ratio <= 0.20) {
@@ -183,6 +183,12 @@ export function getBottleStatusLabel(status: BottleStatus): { text: string; dotC
         text: 'Đã thanh lý',
         dotClass: 'bg-zinc-500',
         badgeClass: 'text-zinc-700 bg-zinc-100 border border-zinc-300',
+      };
+    case 'ARCHIVED':
+      return {
+        text: 'Đã lưu trữ (Kho rác/Archive)',
+        dotClass: 'bg-purple-500',
+        badgeClass: 'text-purple-700 bg-purple-50 border border-purple-200',
       };
     default:
       return {

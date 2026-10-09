@@ -2,6 +2,78 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Suppress harmless Vite HMR WebSocket closure in cloud preview iframe
+      (function() {
+        if (typeof window !== 'undefined' && window.WebSocket) {
+          var OriginalWS = window.WebSocket;
+          function ViteSafeWebSocket(url, protocols) {
+            var isViteHmr = protocols === 'vite-hmr' || (typeof url === 'string' && (url.indexOf('vite') !== -1 || url.indexOf('ais-dev') !== -1 || url.indexOf('ais-pre') !== -1));
+            if (isViteHmr) {
+              var target = new EventTarget();
+              target.url = url;
+              target.readyState = 1; // OPEN
+              target.send = function() {};
+              target.close = function() {
+                target.readyState = 3;
+                var closeEv;
+                try {
+                  closeEv = new CloseEvent('close', { wasClean: true, code: 1000 });
+                } catch (e) {
+                  closeEv = new Event('close');
+                  closeEv.wasClean = true;
+                }
+                if (typeof target.onclose === 'function') target.onclose(closeEv);
+                target.dispatchEvent(closeEv);
+              };
+              setTimeout(function() {
+                target.readyState = 1;
+                var openEv = new Event('open');
+                if (typeof target.onopen === 'function') target.onopen(openEv);
+                target.dispatchEvent(openEv);
+              }, 10);
+              return target;
+            }
+            return new OriginalWS(url, protocols);
+          }
+          ViteSafeWebSocket.prototype = OriginalWS.prototype;
+          ViteSafeWebSocket.CONNECTING = 0;
+          ViteSafeWebSocket.OPEN = 1;
+          ViteSafeWebSocket.CLOSING = 2;
+          ViteSafeWebSocket.CLOSED = 3;
+          window.WebSocket = ViteSafeWebSocket;
+        }
+
+        var origConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var text = args.map(function(a) { return (a && (a.message || a.stack || String(a))) || ''; }).join(' ');
+          if (text.indexOf('WebSocket closed without opened') !== -1 || text.indexOf('WebSocket closed') !== -1) {
+            return;
+          }
+          return origConsoleError.apply(console, arguments);
+        };
+        window.addEventListener('error', function(e) {
+          var msg = (e && (e.message || '')) + '';
+          var src = (e && (e.filename || '')) + '';
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || src.indexOf('@vite/client') !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e && e.reason;
+          var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('@vite/client') !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0891b2" />
     <meta name="mobile-web-app-capable" content="yes" />

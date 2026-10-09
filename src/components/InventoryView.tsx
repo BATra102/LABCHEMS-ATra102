@@ -21,6 +21,8 @@ import {
   FileSpreadsheet,
   QrCode,
   Printer,
+  Sparkles,
+  CheckCircle2,
 } from 'lucide-react';
 import { ChemicalDetailModal } from './modals/ChemicalDetailModal';
 import { EditChemicalModal } from './modals/EditChemicalModal';
@@ -65,7 +67,27 @@ export const InventoryView: React.FC<Props> = ({
     isManager,
     currentUser,
     referenceDate,
+    recordUsage,
   } = useLab();
+
+  // Quick feedback toast for 1-click usage
+  const [quickUseFeedback, setQuickUseFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const handleQuickUseFullBottle = (chem: Chemical) => {
+    const res = recordUsage({
+      chemicalId: chem.id,
+      useFullBottle: true,
+      source: 'MANUAL',
+      purpose: 'Dùng hết 1 chai',
+      notes: '[Cách 1] Dùng hết 1 chai',
+    });
+    if (res.success) {
+      setQuickUseFeedback({ message: res.message, type: 'success' });
+    } else {
+      setQuickUseFeedback({ message: res.message, type: 'error' });
+    }
+    setTimeout(() => setQuickUseFeedback(null), 3500);
+  };
 
   // Chemical Detail & Edit Modals State
   const [selectedChemicalForDetail, setSelectedChemicalForDetail] = useState<Chemical | null>(null);
@@ -298,6 +320,27 @@ export const InventoryView: React.FC<Props> = ({
       </div>
 
       {/* Permission Reminder for Users (Section 44) */}
+      {quickUseFeedback && (
+        <div
+          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-top-2 ${
+            quickUseFeedback.type === 'success'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-sm'
+              : 'bg-rose-50 border-rose-300 text-rose-900 shadow-sm'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span>{quickUseFeedback.message}</span>
+          </div>
+          <button
+            onClick={() => setQuickUseFeedback(null)}
+            className="text-slate-400 hover:text-slate-700 text-xs px-2 py-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {!isManager && (
         <div className="p-3 bg-cyan-50/60 border border-cyan-200 rounded-xl text-xs text-cyan-900 flex items-center gap-2">
           <Info className="w-4 h-4 text-cyan-600 shrink-0" />
@@ -518,14 +561,27 @@ export const InventoryView: React.FC<Props> = ({
                         className="flex items-center gap-2"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {/* Quick 1-click use full bottle (Cách 1) */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickUseFullBottle(chem);
+                          }}
+                          className="px-2.5 py-1.5 text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                          title="Dùng hết 1 chai (Cách 1: Trừ trọn 1 chai mà không cần nhập số mL)"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Dùng 1 chai</span>
+                        </button>
+
                         {/* Record Usage (Primary for all users) */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             onOpenRecordUsage(chem.id);
                           }}
-                          className="px-3.5 py-1.5 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-95"
-                          title="Ghi nhận sử dụng và trừ tồn kho"
+                          className="px-3 py-1.5 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-95"
+                          title="Ghi nhận sử dụng số lượng tùy chọn và trừ tồn kho"
                         >
                           + Dùng
                         </button>
@@ -725,6 +781,19 @@ export const InventoryView: React.FC<Props> = ({
                         className="px-6 py-3.5 text-right space-x-1.5 whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {/* 1-click: Dùng hết 1 chai */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQuickUseFullBottle(c);
+                          }}
+                          className="px-2 py-1 text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors cursor-pointer active:scale-95 inline-flex items-center gap-1"
+                          title="Dùng hết 1 chai (Cách 1: Không cần nhập số mL)"
+                        >
+                          <Sparkles className="w-3 h-3 text-amber-700" />
+                          <span>Dùng 1 chai</span>
+                        </button>
+
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -733,7 +802,7 @@ export const InventoryView: React.FC<Props> = ({
                           className="px-2.5 py-1 text-xs font-semibold text-white bg-cyan-600 rounded-lg hover:bg-cyan-700 transition-colors shadow-xs cursor-pointer active:scale-95"
                           title="Ghi nhận sử dụng và trừ tồn kho"
                         >
-                          Dùng
+                          + Dùng
                         </button>
                         {isManager ? (
                           <button

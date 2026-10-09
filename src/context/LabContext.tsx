@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import {
   Chemical,
   Bottle,
+  BottleStatus,
   InventoryTransaction,
   PurchaseItem,
   User,
@@ -131,15 +132,17 @@ interface LabContextType {
     chemicalId: string;
     bottleId?: string;
     autoSelectBottle?: boolean;
-    quantity: number;
-    unit: ChemicalUnit;
-    date: string;
+    quantity?: number;
+    unit?: ChemicalUnit;
+    date?: string;
     project?: string;
     experiment?: string;
     purpose?: string;
     notes?: string;
     userId?: string;
     source?: 'QR_SCAN' | 'MANUAL';
+    useFullBottle?: boolean;
+    emptyBottleAction?: 'EMPTY' | 'ARCHIVE';
   }) => {
     success: boolean;
     message: string;
@@ -1047,7 +1050,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     if (!chem || chem.status === 'ARCHIVED') return { total: 0, unit: chem?.primaryUnit || 'mL' };
 
     const chemBottles = bottles.filter(
-      (b) => b.chemicalId === chemicalId && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED'
+      (b) => b.chemicalId === chemicalId && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED' && b.status !== 'EMPTY'
     );
     let total = 0;
     for (const b of chemBottles) {
@@ -1975,19 +1978,23 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     notes,
     userId,
     source = 'MANUAL',
+    useFullBottle = false,
+    emptyBottleAction = 'EMPTY',
   }: {
     chemicalId: string;
     bottleId?: string;
     autoSelectBottle?: boolean;
-    quantity: number;
-    unit: ChemicalUnit;
-    date: string;
+    quantity?: number;
+    unit?: ChemicalUnit;
+    date?: string;
     project?: string;
     experiment?: string;
     purpose?: string;
     notes?: string;
     userId?: string;
     source?: 'QR_SCAN' | 'MANUAL';
+    useFullBottle?: boolean;
+    emptyBottleAction?: 'EMPTY' | 'ARCHIVE';
   }) => {
     const activeUser = userId ? users.find((u) => u.id === userId) || currentUser : currentUser;
 
@@ -2011,11 +2018,6 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       };
     }
 
-    // 2. Validate quantity
-    if (quantity <= 0) {
-      return { success: false, message: 'Số lượng sử dụng phải lớn hơn 0.' };
-    }
-
     const chem = chemicals.find((c) => c.id === chemicalId);
     if (!chem) return { success: false, message: 'Không tìm thấy hóa chất.' };
 
@@ -2026,11 +2028,59 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       };
     }
 
-    if (!areUnitsCompatible(unit, chem.primaryUnit)) {
-      return { success: false, message: `Đơn vị "${unit}" không tương thích với đơn vị kho của ${chem.name} (${chem.primaryUnit}).` };
+    // 2. Resolve target bottle and effective quantity if useFullBottle (Cách 1: dùng trọn 1 chai)
+    let effectiveQuantity = quantity ?? 0;
+    let effectiveUnit: ChemicalUnit = unit || chem.primaryUnit;
+    let resolvedBottleId = bottleId;
+    let effectiveDate = date || new Date().toISOString().split('T')[0];
+    let effectiveNotes = notes;
+
+    if (useFullBottle) {
+      if (resolvedBottleId) {
+        const tb = bottles.find((b) => b.id === resolvedBottleId && b.chemicalId === chemicalId);
+        if (!tb) return { success: false, message: 'Không tìm thấy chai được chọn.' };
+        if (tb.currentVolume <= 0 || tb.status === 'EMPTY') {
+          return { success: false, message: `Chai ${tb.bottleCode} đã hết hóa chất (0 ${tb.unit}). Vui lòng chọn chai khác.` };
+        }
+        effectiveQuantity = tb.currentVolume;
+        effectiveUnit = tb.unit;
+      } else {
+        // Auto pick the active/earliest expiring bottle for this chemical
+        const availableBottles = bottles.filter((b) => {
+          if (b.chemicalId !== chemicalId || b.currentVolume <= 0 || b.status === 'ARCHIVED' || b.status === 'DISPOSED' || b.status === 'EMPTY') return false;
+          return calculateBottleStatus(b.currentVolume, b.initialVolume, b.expiryDate, referenceDate) !== 'EXPIRED';
+        }).sort((a, b) => {
+          const wA = a.status === 'IN_USE' ? 1 : 2;
+          const wB = b.status === 'IN_USE' ? 1 : 2;
+          if (wA !== wB) return wA - wB;
+          return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+        });
+
+        if (availableBottles.length === 0) {
+          return { success: false, message: `Hóa chất ${chem.name} không còn chai khả dụng trong kho (tất cả đã hết hoặc hết hạn).` };
+        }
+
+        const chosenBottle = availableBottles[0];
+        resolvedBottleId = chosenBottle.id;
+        effectiveQuantity = chosenBottle.currentVolume;
+        effectiveUnit = chosenBottle.unit;
+      }
+
+      effectiveNotes = effectiveNotes
+        ? `${effectiveNotes} (Dùng hết 1 chai)`
+        : `Dùng hết 1 chai (${effectiveQuantity} ${effectiveUnit})`;
     }
 
-    // 2b. Check Permission & Member Limits (Prompt requirement)
+    // 3. Validate effective quantity
+    if (effectiveQuantity <= 0) {
+      return { success: false, message: 'Số lượng sử dụng phải lớn hơn 0 hoặc chai đã hết.' };
+    }
+
+    if (!areUnitsCompatible(effectiveUnit, chem.primaryUnit)) {
+      return { success: false, message: `Đơn vị "${effectiveUnit}" không tương thích với đơn vị kho của ${chem.name} (${chem.primaryUnit}).` };
+    }
+
+    // 3b. Check Permission & Member Limits (Prompt requirement)
     const isTargetManager = activeUser.role === 'MANAGER' || activeUser.role === 'ADMIN';
     if (!isTargetManager) {
       if (activeUser.permissions && activeUser.permissions.recordUsage === false) {
@@ -2039,7 +2089,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
       if (activeUser.limits) {
         const limits = activeUser.limits;
-        const qtyInMl = convertUnit(quantity, unit, 'mL') ?? quantity;
+        const qtyInMl = convertUnit(effectiveQuantity, effectiveUnit, 'mL') ?? effectiveQuantity;
 
         // 1. Max usage per transaction
         if (limits.maxUsagePerTransaction !== null && limits.maxUsagePerTransaction !== undefined && qtyInMl > limits.maxUsagePerTransaction) {
@@ -2053,7 +2103,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
         // 2. Daily usage limit
         if (limits.dailyUsageLimit !== null && limits.dailyUsageLimit !== undefined) {
-          const todayStr = date || referenceDate;
+          const todayStr = effectiveDate || referenceDate;
           let todayUsageMl = 0;
           transactions.forEach((tx) => {
             if (tx.type === 'USAGE' && tx.user === activeUser.name && tx.date === todayStr && !tx.isReversed) {
@@ -2075,7 +2125,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
         // 3. Daily transaction count limit
         if (limits.dailyTransactionCount !== null && limits.dailyTransactionCount !== undefined) {
-          const todayStr = date || referenceDate;
+          const todayStr = effectiveDate || referenceDate;
           const todayTxCount = transactions.filter(
             (tx) => tx.type === 'USAGE' && tx.user === activeUser.name && tx.date === todayStr && !tx.isReversed
           ).length;
@@ -2092,9 +2142,9 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       }
     }
 
-    // 3. SPECIFIC BOTTLE USAGE
-    if (bottleId && !autoSelectBottle) {
-      const targetBottle = bottles.find((b) => b.id === bottleId && b.chemicalId === chemicalId);
+    // 4. SPECIFIC BOTTLE USAGE (or resolved bottle from useFullBottle)
+    if (resolvedBottleId && (!autoSelectBottle || useFullBottle)) {
+      const targetBottle = bottles.find((b) => b.id === resolvedBottleId && b.chemicalId === chemicalId);
       if (!targetBottle) {
         return { success: false, message: 'Không tìm thấy chai được chọn.' };
       }
@@ -2126,11 +2176,14 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         return { success: false, message: `Chai ${targetBottle.bottleCode} đã hết hóa chất (EMPTY). Vui lòng chọn chai khác.` };
       }
 
-      if (!areUnitsCompatible(unit, targetBottle.unit)) {
-        return { success: false, message: `Đơn vị "${unit}" không tương thích với đơn vị chai (${targetBottle.unit}).` };
+      if (!areUnitsCompatible(effectiveUnit, targetBottle.unit)) {
+        return { success: false, message: `Đơn vị "${effectiveUnit}" không tương thích với đơn vị chai (${targetBottle.unit}).` };
       }
 
-      const neededInBottleUnit = convertUnit(quantity, unit, targetBottle.unit);
+      const neededInBottleUnit = useFullBottle
+        ? targetBottle.currentVolume
+        : convertUnit(effectiveQuantity, effectiveUnit, targetBottle.unit);
+
       if (neededInBottleUnit === null) {
         return { success: false, message: 'Lỗi chuyển đổi đơn vị đo lường.' };
       }
@@ -2139,42 +2192,78 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       if (neededInBottleUnit > targetBottle.currentVolume + 0.0001) {
         return {
           success: false,
-          message: `Không đủ tồn kho. Chai ${targetBottle.bottleCode} chỉ còn ${targetBottle.currentVolume} ${targetBottle.unit} (yêu cầu ${quantity} ${unit}).`,
+          message: `Không đủ tồn kho. Chai ${targetBottle.bottleCode} chỉ còn ${targetBottle.currentVolume} ${targetBottle.unit} (yêu cầu ${effectiveQuantity} ${effectiveUnit}).`,
         };
       }
 
       // Calculate new volume atomically
-      const newBottleVolume = Math.max(0, Math.round((targetBottle.currentVolume - neededInBottleUnit) * 10000) / 10000);
-      const newStatus =
-        newBottleVolume === 0
-          ? 'EMPTY'
-          : calculateBottleStatus(newBottleVolume, targetBottle.initialVolume, targetBottle.expiryDate, referenceDate);
+      const newBottleVolume = useFullBottle
+        ? 0
+        : Math.max(0, Math.round((targetBottle.currentVolume - neededInBottleUnit) * 10000) / 10000);
 
+      const resolvedEmptyAction = emptyBottleAction || 'EMPTY';
+      const isBottleEmptyNow = newBottleVolume <= 0.0001;
+      const newStatus: BottleStatus = isBottleEmptyNow
+        ? (resolvedEmptyAction === 'ARCHIVE' ? 'ARCHIVED' : 'EMPTY')
+        : calculateBottleStatus(newBottleVolume, targetBottle.initialVolume, targetBottle.expiryDate, referenceDate);
+
+      const nowIso = new Date().toISOString();
       const updatedBottles = bottles.map((b) =>
         b.id === targetBottle.id
           ? {
               ...b,
               currentVolume: newBottleVolume,
               status: newStatus,
-              openedDate: b.openedDate || date,
+              previousStatus: isBottleEmptyNow ? b.status : b.previousStatus,
+              openedDate: b.openedDate || effectiveDate,
+              ...(newStatus === 'ARCHIVED'
+                ? {
+                    archivedAt: nowIso,
+                    archivedBy: activeUser.name,
+                    archivedReason: useFullBottle
+                      ? 'Tự động chuyển vào kho lưu trữ khi dùng hết 1 chai'
+                      : 'Tự động chuyển vào kho lưu trữ khi hết hóa chất',
+                  }
+                : {}),
             }
           : b
       );
       setBottles(updatedBottles);
+
+      // If bottle is archived, also log to deletionLogs so it displays in Archive Center
+      if (newStatus === 'ARCHIVED') {
+        const delLog: DeletionLog = {
+          id: `del-bot-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          entityType: 'BOTTLE',
+          entityId: targetBottle.id,
+          chemicalId: chem.id,
+          chemicalName: chem.name,
+          bottleIds: [targetBottle.id],
+          stockAtDeletion: targetBottle.currentVolume,
+          unit: targetBottle.unit,
+          deletedBy: activeUser.name,
+          deletedAt: nowIso,
+          reason: useFullBottle
+            ? 'Tự động chuyển vào kho lưu trữ sau khi dùng hết 1 chai'
+            : 'Tự động chuyển vào kho lưu trữ khi hết hóa chất',
+          previousStatus: targetBottle.status,
+        };
+        setDeletionLogs((prev) => [delLog, ...prev]);
+      }
 
       // Create transaction
       const txId = `tx-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
       const newTx: InventoryTransaction = {
         id: txId,
         timestamp: new Date().toISOString(),
-        date,
+        date: effectiveDate,
         type: 'USAGE',
         chemicalId: chem.id,
         chemicalName: chem.name,
         bottleId: targetBottle.id,
         bottleCode: targetBottle.bottleCode,
-        quantity,
-        unit,
+        quantity: effectiveQuantity,
+        unit: effectiveUnit,
         previousStock: targetBottle.currentVolume,
         newStock: newBottleVolume,
         user: activeUser.name,
@@ -2183,20 +2272,26 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         source: source || 'MANUAL',
         project: project || 'Dược liệu & Chiết xuất',
         experiment,
-        purpose: purpose || 'Nghiên cứu / Thí nghiệm',
-        notes: notes || `Sử dụng từ chai ${targetBottle.bottleCode}`,
+        purpose: purpose || (useFullBottle ? 'Dùng hết 1 chai' : 'Nghiên cứu / Thí nghiệm'),
+        notes: effectiveNotes || `Sử dụng từ chai ${targetBottle.bottleCode}${isBottleEmptyNow ? ` (${newStatus === 'ARCHIVED' ? 'Đã lưu trữ - ARCHIVED' : 'Đã hết - EMPTY'})` : ''}`,
+        usedFullBottle: useFullBottle || false,
       };
       setTransactions((prev) => [newTx, ...prev]);
 
       // Calculate new total stock
       let newTotal = 0;
       for (const b of updatedBottles) {
-        if (b.chemicalId === chemicalId && b.currentVolume > 0) {
+        if (b.chemicalId === chemicalId && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED' && b.status !== 'EMPTY') {
           const conv = convertUnit(b.currentVolume, b.unit, chem.primaryUnit);
           if (conv !== null) newTotal += conv;
         }
       }
       newTotal = Math.round(newTotal * 10000) / 10000;
+
+      // Count remaining available bottles
+      const remainingBottlesCount = updatedBottles.filter(
+        (b) => b.chemicalId === chemicalId && b.currentVolume > 0 && b.status !== 'DISPOSED' && b.status !== 'ARCHIVED' && b.status !== 'EMPTY'
+      ).length;
 
       // Sync purchase list
       setPurchaseItems((prev) => syncPurchaseItemForChemical(chem, newTotal, prev));
@@ -2210,10 +2305,12 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
       // Audit log (Section 52)
       logAudit(
-        'USE CHEMICAL',
+        newStatus === 'ARCHIVED' ? 'ARCHIVE BOTTLE' : 'USE CHEMICAL',
         'TRANSACTION',
         txId,
-        `${activeUser.name} đã dùng ${quantity} ${unit} từ chai ${targetBottle.bottleCode} (${chem.name}): ${targetBottle.currentVolume} → ${newBottleVolume} ${targetBottle.unit}. Tổng kho còn: ${newTotal} ${chem.primaryUnit}.`
+        useFullBottle
+          ? `${activeUser.name} đã dùng hết 1 chai ${targetBottle.bottleCode} (${chem.name} - ${effectiveQuantity} ${effectiveUnit}). Trạng thái: ${newStatus === 'ARCHIVED' ? 'LƯU TRỮ (ARCHIVED)' : 'ĐÃ HẾT (EMPTY)'}. Kho còn lại: ${remainingBottlesCount} chai (tổng ${newTotal} ${chem.primaryUnit}).`
+          : `${activeUser.name} đã dùng ${effectiveQuantity} ${effectiveUnit} từ chai ${targetBottle.bottleCode} (${chem.name}): ${targetBottle.currentVolume} → ${newBottleVolume} ${targetBottle.unit}${isBottleEmptyNow ? ` (${newStatus})` : ''}. Tổng kho còn: ${newTotal} ${chem.primaryUnit}.`
       );
 
       // Async sync to Supabase Realtime Database
@@ -2225,15 +2322,21 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
           userName: activeUser.name,
           chemicalId: chem.id,
           chemicalName: chem.name,
-          purpose,
+          purpose: purpose || (useFullBottle ? 'Dùng hết 1 chai' : undefined),
           projectName: project,
-          notes,
+          notes: effectiveNotes,
         }).catch((err) => console.warn('Supabase usage recording error:', err));
       }
 
+      const successMessage = useFullBottle
+        ? (newStatus === 'ARCHIVED'
+            ? `Đã dùng hết 1 chai ${chem.name} (${targetBottle.bottleCode} - ${effectiveQuantity} ${effectiveUnit}) và tự động chuyển vào Kho Lưu Trữ (Archive). Kho còn lại: ${remainingBottlesCount} chai (tổng tồn: ${newTotal} ${chem.primaryUnit}).`
+            : `Đã dùng hết 1 chai ${chem.name} (${targetBottle.bottleCode} - ${effectiveQuantity} ${effectiveUnit}) và tự động đánh dấu trạng thái ĐÃ HẾT (EMPTY). Kho còn lại: ${remainingBottlesCount} chai (tổng tồn: ${newTotal} ${chem.primaryUnit}).`)
+        : `Đã ghi nhận sử dụng ${effectiveQuantity} ${effectiveUnit} từ chai ${targetBottle.bottleCode}. Chai còn lại: ${newBottleVolume} ${targetBottle.unit}${newStatus === 'EMPTY' ? ' (Đã hết - EMPTY)' : newStatus === 'ARCHIVED' ? ' (Đã lưu trữ - ARCHIVED)' : ''}.`;
+
       return {
         success: true,
-        message: `Đã ghi nhận sử dụng ${quantity} ${unit} từ chai ${targetBottle.bottleCode}. Chai còn lại: ${newBottleVolume} ${targetBottle.unit}.`,
+        message: successMessage,
         transactionIds: [txId],
       };
     }
@@ -2262,20 +2365,20 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
     });
 
-    const totalNeededInPrimary = convertUnit(quantity, unit, chem.primaryUnit);
+    const totalNeededInPrimary = convertUnit(effectiveQuantity, effectiveUnit, chem.primaryUnit);
     if (totalNeededInPrimary === null) {
-      return { success: false, message: `Lỗi đơn vị ${unit}.` };
+      return { success: false, message: `Lỗi đơn vị ${effectiveUnit}.` };
     }
 
     const { total: currentTotalStock } = getChemicalTotalStock(chem.id);
     if (totalNeededInPrimary > currentTotalStock + 0.0001) {
       return {
         success: false,
-        message: `Insufficient stock. Kho chỉ còn ${currentTotalStock} ${chem.primaryUnit} (yêu cầu ${quantity} ${unit}).`,
+        message: `Insufficient stock. Kho chỉ còn ${currentTotalStock} ${chem.primaryUnit} (yêu cầu ${effectiveQuantity} ${effectiveUnit}).`,
       };
     }
 
-    let remainingNeeded = quantity;
+    let remainingNeeded = effectiveQuantity;
     const createdTxIds: string[] = [];
     const updatedBottlesMap = new Map<string, Bottle>();
     bottles.forEach((b) => updatedBottlesMap.set(b.id, { ...b }));
@@ -2284,21 +2387,28 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     for (const b of sortedBottles) {
       if (remainingNeeded <= 0.00001) break;
       const bottleRef = updatedBottlesMap.get(b.id)!;
-      const neededInBottleUnit = convertUnit(remainingNeeded, unit, bottleRef.unit);
+      const neededInBottleUnit = convertUnit(remainingNeeded, effectiveUnit, bottleRef.unit);
       if (neededInBottleUnit === null) continue;
 
       const deductInBottleUnit = Math.min(bottleRef.currentVolume, neededInBottleUnit);
-      const deductInReqUnit = convertUnit(deductInBottleUnit, bottleRef.unit, unit)!;
+      const deductInReqUnit = convertUnit(deductInBottleUnit, bottleRef.unit, effectiveUnit)!;
 
       const newVolume = Math.max(0, Math.round((bottleRef.currentVolume - deductInBottleUnit) * 10000) / 10000);
-      const newStatus =
-        newVolume === 0
-          ? 'EMPTY'
+      const isAutoEmpty = newVolume <= 0.0001;
+      const newStatus: BottleStatus =
+        isAutoEmpty
+          ? (emptyBottleAction === 'ARCHIVE' ? 'ARCHIVED' : 'EMPTY')
           : calculateBottleStatus(newVolume, bottleRef.initialVolume, bottleRef.expiryDate, referenceDate);
 
       bottleRef.currentVolume = newVolume;
       bottleRef.status = newStatus;
-      if (!bottleRef.openedDate) bottleRef.openedDate = date;
+      if (!bottleRef.openedDate) bottleRef.openedDate = effectiveDate;
+      if (newStatus === 'ARCHIVED') {
+        bottleRef.archivedAt = new Date().toISOString();
+        bottleRef.archivedBy = activeUser.name;
+        bottleRef.archivedReason = 'Tự động chuyển vào kho lưu trữ sau khi dùng hết chai';
+        bottleRef.previousStatus = b.status;
+      }
 
       const subTxId = `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       createdTxIds.push(subTxId);
@@ -2306,14 +2416,14 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       const subTx: InventoryTransaction = {
         id: subTxId,
         timestamp: new Date().toISOString(),
-        date,
+        date: effectiveDate,
         type: 'USAGE',
         chemicalId: chem.id,
         chemicalName: chem.name,
         bottleId: bottleRef.id,
         bottleCode: bottleRef.bottleCode,
         quantity: Math.round(deductInReqUnit * 10000) / 10000,
-        unit,
+        unit: effectiveUnit,
         previousStock: b.currentVolume,
         newStock: newVolume,
         user: activeUser.name,
@@ -2327,7 +2437,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       };
 
       setTransactions((prev) => [subTx, ...prev]);
-      deductionsSummary.push(`${subTx.quantity} ${unit} từ chai ${bottleRef.bottleCode} (còn ${newVolume} ${bottleRef.unit})`);
+      deductionsSummary.push(`${subTx.quantity} ${effectiveUnit} từ chai ${bottleRef.bottleCode} (còn ${newVolume} ${bottleRef.unit})`);
       remainingNeeded -= deductInReqUnit;
 
       // Sync individual bottle deduction to Supabase

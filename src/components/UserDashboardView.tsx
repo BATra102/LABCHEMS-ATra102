@@ -41,7 +41,8 @@ export const UserDashboardView: React.FC<Props> = ({
   onOpenUserGuide,
   onSelectChemicalFromSearch,
 }) => {
-  const { currentUser, transactions, chemicals, bottles, getChemicalTotalStock, getChemicalStockStatus } = useLab();
+  const { currentUser, transactions, chemicals, bottles, getChemicalTotalStock, getChemicalStockStatus, recordUsage } = useLab();
+  const [quickNotice, setQuickNotice] = useState<string | null>(null);
 
   // Search state within User Dashboard
   const [dashboardSearch, setDashboardSearch] = useState('');
@@ -119,6 +120,12 @@ export const UserDashboardView: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16 sm:pb-8">
+      {quickNotice && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in">
+          <span>{quickNotice}</span>
+          <button onClick={() => setQuickNotice(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+        </div>
+      )}
       {/* 1. Header: Greeting & Quick Subtitle */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-7 relative overflow-hidden">
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -302,13 +309,36 @@ export const UserDashboardView: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0">
                         <div className="text-right">
+                          <div className="text-[11px] font-semibold text-slate-500">
+                            Còn {bottles.filter((b) => b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'DISPOSED').length} chai
+                          </div>
                           <div className="font-bold font-mono text-slate-900">
                             {stock.total} {stock.unit}
                           </div>
                           <span className={`text-[9px] font-bold ${sLabel.badgeClass}`}>{sLabel.text}</span>
                         </div>
+
+                        <button
+                          onClick={() => {
+                            const res = recordUsage({
+                              chemicalId: chem.id,
+                              useFullBottle: true,
+                              source: 'MANUAL',
+                              purpose: 'Dùng hết 1 chai',
+                              notes: '[Cách 1] Dùng hết 1 chai',
+                            });
+                            if (res.success) {
+                              setQuickNotice(res.message);
+                              setTimeout(() => setQuickNotice(null), 3500);
+                            }
+                          }}
+                          className="px-2.5 py-1.5 text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl transition-all cursor-pointer shadow-2xs"
+                          title="Dùng hết 1 chai (Cách 1: Không cần nhập số mL)"
+                        >
+                          ⚡ Dùng 1 chai
+                        </button>
 
                         <button
                           onClick={() => onOpenRecordUsage(chem.id)}

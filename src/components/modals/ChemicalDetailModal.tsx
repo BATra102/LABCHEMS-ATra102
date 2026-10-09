@@ -29,6 +29,7 @@ import {
   TrendingDown,
   Info,
   Trash2,
+  Sparkles,
 } from 'lucide-react';
 
 interface Props {
@@ -66,11 +67,13 @@ export const ChemicalDetailModal: React.FC<Props> = ({
     getChemicalTotalStock,
     getChemicalStockStatus,
     getChemicalExpiryStatus,
+    recordUsage,
   } = useLab();
 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [bottleSearch, setBottleSearch] = useState('');
   const [bottleStatusFilter, setBottleStatusFilter] = useState<string>('ALL');
+  const [quickNotice, setQuickNotice] = useState<string | null>(null);
 
   if (!isOpen || !chemical) return null;
 
@@ -195,6 +198,31 @@ export const ChemicalDetailModal: React.FC<Props> = ({
                 <span>Xóa</span>
               </button>
             )}
+
+            {/* Quick 1-click use full bottle (Cách 1) */}
+            <button
+              type="button"
+              onClick={() => {
+                const res = recordUsage({
+                  chemicalId: chemical.id,
+                  useFullBottle: true,
+                  source: 'MANUAL',
+                  purpose: 'Dùng hết 1 chai',
+                  notes: '[Cách 1] Dùng hết 1 chai',
+                });
+                if (res.success) {
+                  setQuickNotice(res.message);
+                  setTimeout(() => setQuickNotice(null), 3500);
+                } else {
+                  setQuickNotice(res.message);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-xl transition-all shadow-sm cursor-pointer hover:scale-105 active:scale-95"
+              title="Dùng hết 1 chai (Cách 1: Không cần nhập số mL)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-800" />
+              <span>Dùng 1 Chai</span>
+            </button>
 
             {/* Record Usage Button */}
             <button
@@ -343,6 +371,12 @@ export const ChemicalDetailModal: React.FC<Props> = ({
 
         {/* Tab Content Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+          {quickNotice && (
+            <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in">
+              <span>{quickNotice}</span>
+              <button onClick={() => setQuickNotice(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+          )}
 
           {/* TAB 1: OVERVIEW & CHEMICAL INFORMATION */}
           {activeTab === 'overview' && (

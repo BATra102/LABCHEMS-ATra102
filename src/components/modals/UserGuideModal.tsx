@@ -320,9 +320,14 @@ export const UserGuideModal: React.FC<Props> = ({ isOpen, onClose, defaultTab = 
                   <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                     <span className="w-6 h-6 rounded-full bg-cyan-700 text-white flex items-center justify-center text-xs font-bold shrink-0">3</span>
                     <div>
-                      <div className="text-xs font-bold text-slate-900">Hướng khung quét vào tem nhãn dán trên chai</div>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        Căn chỉnh mã QR in trên thân chai vào giữa khung ngắm màu xanh. Camera sẽ tự động phát hiện mã chai (ví dụ: <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[11px]">B-HEX-001</code>).
+                      <div className="text-xs font-bold text-slate-900">
+                        Quét mã vạch (Barcode) / Mã hàng in sẵn trên chai HOẶC tem mã chai
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        <strong>Cách 1 (Nhanh gọn - Khuyên dùng):</strong> Bạn có thể dùng trực tiếp <strong>mã hàng (Catalog Number)</strong> hoặc <strong>mã vạch (Barcode)</strong> in sẵn của nhà sản xuất trên vỏ chai. <strong>Không bắt buộc phải in dán nhãn riêng cho từng chai!</strong> Hệ thống sẽ tự động nhận diện loại hóa chất, hiển thị còn mấy chai và tổng tồn bao nhiêu. Khi sử dụng, chỉ cần chọn <strong>"⚡ Dùng hết 1 chai"</strong> mà không cần nhập số mL, hệ thống sẽ tự động chuyển trạng thái chai thành <strong>EMPTY</strong> (0 mL) hoặc chuyển thẳng vào <strong>Kho Lưu Trữ (Archive)</strong> theo lựa chọn của bạn.
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        <strong>Cách 2 (Quản lý chi tiết):</strong> Dán tem nhãn QR riêng cho từng chai (ví dụ: <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[11px]">B-HEX-001</code>) nếu phòng lab muốn quản lý số mL lẻ chi tiết của từng chai.
                       </p>
                     </div>
                   </div>
@@ -330,9 +335,9 @@ export const UserGuideModal: React.FC<Props> = ({ isOpen, onClose, defaultTab = 
                   <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                     <span className="w-6 h-6 rounded-full bg-cyan-700 text-white flex items-center justify-center text-xs font-bold shrink-0">4</span>
                     <div>
-                      <div className="text-xs font-bold text-slate-900">Xem hồ sơ chai và Ghi sử dụng tức thì</div>
+                      <div className="text-xs font-bold text-slate-900">Xem tồn kho và Ghi sử dụng tức thì</div>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Hệ thống sẽ ngay lập tức mở cửa sổ chi tiết chai: hiển thị số dư tồn thực tế, số ngày còn lại trước khi hết hạn, ngày mở nắp, và nút <strong>"Ghi Sử Dụng"</strong> chỉ bằng 1 cú chạm.
+                        Hệ thống hiển thị ngay: còn hóa chất loại đó không, còn mấy chai và tổng tồn bao nhiêu. Có sẵn nút <strong>"⚡ Dùng hết 1 chai"</strong> (1 chạm, tự động trừ 1 chai mà không cần nhập số mL) hoặc nút <strong>"Nhập số mL dùng"</strong> nếu muốn đong đo lẻ.
                       </p>
                     </div>
                   </div>

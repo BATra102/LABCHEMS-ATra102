@@ -242,6 +242,7 @@ export interface Bottle {
   disposalNotes?: string;
   archivedAt?: string;
   archivedBy?: string;
+  archivedReason?: string;
   previousStatus?: BottleStatus;
 }
 
@@ -316,6 +317,7 @@ export interface InventoryTransaction {
   reversedBy?: string;
   reversalReason?: string;
   originalTransactionId?: string;
+  usedFullBottle?: boolean;
 }
 
 export interface Supplier {

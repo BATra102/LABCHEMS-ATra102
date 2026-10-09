@@ -21,14 +21,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 
 interface Props {
   bottle: Bottle | null;
   isOpen: boolean;
   onClose: () => void;
-  onRecordUsage?: (bottleId: string, chemicalId: string) => void;
+  onRecordUsage?: (bottleId: string, chemicalId: string, useFullBottle?: boolean) => void;
   onOpenChemicalDetail?: (chemical: Chemical) => void;
   onOpenPrintLabel?: (bottle: Bottle) => void;
   onOpenDiscrepancyModal?: (chemId?: string, bottleId?: string) => void;
@@ -583,16 +584,32 @@ export const BottleDetailModal: React.FC<Props> = ({
               Đóng
             </button>
             {!isDisposed && !isEmpty && onRecordUsage && (
-              <button
-                onClick={() => {
-                  onClose();
-                  onRecordUsage(bottle.id, bottle.chemicalId);
-                }}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
-              >
-                <FlaskConical className="w-3.5 h-3.5" />
-                <span>+ Ghi dùng từ chai này</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onRecordUsage(bottle.id, bottle.chemicalId, true);
+                  }}
+                  className="px-3.5 py-1.5 text-xs font-bold text-amber-950 bg-amber-200 hover:bg-amber-300 rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                  title="Dùng hết chai này (Cách 1: Không cần nhập số mL)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-800" />
+                  <span>⚡ Dùng hết chai</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onRecordUsage(bottle.id, bottle.chemicalId, false);
+                  }}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  <span>+ Ghi dùng mL</span>
+                </button>
+              </>
             )}
           </div>
         </div>

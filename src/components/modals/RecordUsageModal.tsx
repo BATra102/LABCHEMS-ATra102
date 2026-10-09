@@ -32,6 +32,7 @@ interface Props {
   onClose: () => void;
   preselectedChemicalId?: string;
   preselectedBottleId?: string;
+  initialUseFullBottle?: boolean;
 }
 
 const PRESET_PURPOSES = [
@@ -49,6 +50,7 @@ export const RecordUsageModal: React.FC<Props> = ({
   onClose,
   preselectedChemicalId,
   preselectedBottleId,
+  initialUseFullBottle = false,
 }) => {
   const {
     chemicals,
@@ -77,6 +79,8 @@ export const RecordUsageModal: React.FC<Props> = ({
   const [chemicalId, setChemicalId] = useState<string>(preselectedChemicalId || '');
   const [bottleId, setBottleId] = useState<string>(preselectedBottleId || '');
   const [autoSelectBottle, setAutoSelectBottle] = useState<boolean>(!preselectedBottleId);
+  const [useFullBottle, setUseFullBottle] = useState<boolean>(initialUseFullBottle || false);
+  const [emptyBottleAction, setEmptyBottleAction] = useState<'EMPTY' | 'ARCHIVE'>('EMPTY');
   const [quantity, setQuantity] = useState<string>('100');
   const [unit, setUnit] = useState<ChemicalUnit>('mL');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -141,15 +145,16 @@ export const RecordUsageModal: React.FC<Props> = ({
   }, [bottles, chemicalId]);
 
   // Real-time Stock and Limits evaluation
-  const parsedQty = parseFloat(quantity) || 0;
+  const targetBottleVolume = activeBottle?.currentVolume ?? (availableBottlesForChem[0]?.currentVolume ?? 0);
+  const parsedQty = useFullBottle ? targetBottleVolume : (parseFloat(quantity) || 0);
   const bottleUnit = activeBottle?.unit || unit;
   const currentBottleVol = activeBottle?.currentVolume ?? 0;
   const initialBottleVol = activeBottle?.initialVolume ?? 0;
 
   // Insufficient stock check (Requirement 9: No negative stock!)
-  const isInsufficientStock = activeBottle
-    ? parsedQty > currentBottleVol + 0.0001
-    : false;
+  const isInsufficientStock = useFullBottle
+    ? (availableBottlesForChem.length === 0 && (!activeBottle || activeBottle.currentVolume <= 0))
+    : (activeBottle ? parsedQty > currentBottleVol + 0.0001 : false);
 
   const stockRemainingAfter = activeBottle
     ? Math.max(0, Math.round((currentBottleVol - parsedQty) * 10000) / 10000)
@@ -175,7 +180,7 @@ export const RecordUsageModal: React.FC<Props> = ({
 
   const hasBlocker =
     !canUseChemical ||
-    parsedQty <= 0 ||
+    (useFullBottle ? targetBottleVolume <= 0 : parsedQty <= 0) ||
     isInsufficientStock ||
     isBottleExpired ||
     isBottleArchived ||
@@ -219,6 +224,7 @@ export const RecordUsageModal: React.FC<Props> = ({
           b.bottleCode.toLowerCase() === targetIdent ||
           b.id.toLowerCase() === targetIdent ||
           (b.qrId && b.qrId.toLowerCase() === targetIdent) ||
+          (b.barcode && b.barcode.toLowerCase() === targetIdent) ||
           getBottleQrId(b.bottleCode).toLowerCase() === targetIdent
       );
 
@@ -228,24 +234,39 @@ export const RecordUsageModal: React.FC<Props> = ({
       }
 
       if (matchingBottles.length === 0) {
-        // Also check if user scanned a chemical code instead of bottle
+        // Also check if user scanned a chemical code / product code / catalog number / barcode (Cách 1)
         const chemMatch = chemicals.find(
           (c) =>
             c.id.toLowerCase() === targetIdent ||
             c.code.toLowerCase() === targetIdent ||
-            c.casNumber.toLowerCase() === targetIdent
+            c.casNumber.toLowerCase() === targetIdent ||
+            (c.catalogNumber && c.catalogNumber.toLowerCase() === targetIdent) ||
+            c.name.toLowerCase() === targetIdent ||
+            c.englishName.toLowerCase() === targetIdent
         );
 
         if (chemMatch) {
-          // If chemical has only 1 active bottle, choose it, otherwise ask user
-          const chemBts = bottles.filter((b) => b.chemicalId === chemMatch.id && b.status !== 'ARCHIVED');
-          if (chemBts.length === 1) {
-            handleSelectBottleDirect(chemBts[0]);
-            return;
+          const chemBts = bottles.filter(
+            (b) => b.chemicalId === chemMatch.id && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED' && b.currentVolume > 0
+          );
+          playBeep();
+          setScannedChemical(chemMatch);
+          setChemicalId(chemMatch.id);
+          if (chemBts.length > 0) {
+            setScannedBottle(chemBts[0]);
+            setBottleId(chemBts[0].id);
+            setUnit(chemBts[0].unit);
+          } else {
+            setScannedBottle(null);
+            setBottleId('');
+            setUnit(chemMatch.primaryUnit);
           }
+          setAutoSelectBottle(true);
+          setIsScanningActive(false);
+          return;
         }
 
-        setQrScanError('Không tìm thấy chai hóa chất này trong hệ thống.');
+        setQrScanError('Không tìm thấy chai hoặc hóa chất này trong hệ thống.');
         return;
       }
 
@@ -455,11 +476,13 @@ export const RecordUsageModal: React.FC<Props> = ({
   // Reset when dialog opens
   useEffect(() => {
     if (isOpen) {
+      setUseFullBottle(Boolean(initialUseFullBottle));
+      setEmptyBottleAction('EMPTY');
       setErrorMsg(null);
       setSuccessMsg(null);
       setApprovalSentMsg(null);
       setQrScanError(null);
-      if (preselectedBottleId) {
+      if (preselectedBottleId || initialUseFullBottle) {
         setSelectionMode('MANUAL');
         setIsScanningActive(false);
       } else {
@@ -468,7 +491,7 @@ export const RecordUsageModal: React.FC<Props> = ({
         setScannedBottle(null);
       }
     }
-  }, [isOpen, preselectedBottleId]);
+  }, [isOpen, preselectedBottleId, initialUseFullBottle]);
 
   // Request Manager Approval if limit exceeded
   const handleSendApproval = () => {
@@ -528,10 +551,12 @@ export const RecordUsageModal: React.FC<Props> = ({
       date,
       project: project || 'IRP-2026',
       experiment: experiment || 'Chiết xuất',
-      purpose: finalPurpose || 'Thí nghiệm',
-      notes: notes || (selectionMode === 'QR' ? `Quét mã QR chai ${activeBottle?.bottleCode}` : undefined),
+      purpose: finalPurpose || (useFullBottle ? 'Dùng hết 1 chai' : 'Thí nghiệm'),
+      notes: notes || (useFullBottle ? 'Dùng hết 1 chai' : selectionMode === 'QR' ? `Quét mã QR chai ${activeBottle?.bottleCode}` : undefined),
       userId: currentUser.id,
       source: selectionMode === 'QR' ? 'QR_SCAN' : 'MANUAL',
+      useFullBottle,
+      emptyBottleAction: useFullBottle ? emptyBottleAction : undefined,
     });
 
     if (!res.success) {
@@ -827,8 +852,8 @@ export const RecordUsageModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Once Scanned: Show Recognized Bottle Card (Requirement 5 & 6) */}
-              {!isScanningActive && scannedBottle && scannedChemical && (
+              {/* Once Scanned: Show Recognized Card (Requirement 5 & 6) */}
+              {!isScanningActive && scannedChemical && (
                 <div className="space-y-3 animate-in fade-in">
                   <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3">
                     <div className="flex items-start justify-between">
@@ -837,17 +862,21 @@ export const RecordUsageModal: React.FC<Props> = ({
                           <Check className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 font-mono">
-                            ✓ ĐÃ NHẬN DIỆN CHAI HÓA CHẤT
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 font-mono flex items-center gap-1.5">
+                            <span>✓ ĐÃ NHẬN DIỆN {scannedBottle ? 'CHAI HÓA CHẤT' : 'MÃ HÀNG HÓA CHẤT'}</span>
+                            <span className="px-1 py-0.2 rounded bg-emerald-200 text-emerald-900 text-[9px] font-bold">Cách 1</span>
                           </div>
                           <div className="text-sm font-bold text-slate-900 mt-0.5">
                             {scannedChemical.name}
                           </div>
                           <div className="text-[11px] text-slate-600 font-mono">
-                            CAS: {scannedChemical.casNumber} · Mã chai:{' '}
-                            <strong className="text-emerald-900 font-bold">
-                              {scannedBottle.bottleCode}
-                            </strong>
+                            CAS: {scannedChemical.casNumber} · Mã: <strong className="text-slate-800">{scannedChemical.code}</strong>
+                            {scannedChemical.catalogNumber && (
+                              <span> · Mã hàng: <strong className="text-slate-800">{scannedChemical.catalogNumber}</strong></span>
+                            )}
+                            {scannedBottle && (
+                              <span> · Chai: <strong className="text-emerald-900 font-bold">{scannedBottle.bottleCode}</strong></span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -857,37 +886,43 @@ export const RecordUsageModal: React.FC<Props> = ({
                         onClick={() => setIsScanningActive(true)}
                         className="px-2.5 py-1 text-xs font-semibold text-cyan-800 bg-cyan-100 hover:bg-cyan-200 rounded-lg transition-colors cursor-pointer"
                       >
-                        Quét lại chai khác
+                        Quét lại mã khác
                       </button>
                     </div>
 
-                    {/* Bottle Specs Grid (Requirement 5) */}
+                    {/* Cách 1: Tổng quan số chai và lượng tồn */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-emerald-200/60 text-xs">
                       <div className="p-2 bg-white rounded-xl border border-emerald-100">
-                        <span className="text-[10px] text-slate-500 font-medium">Tồn hiện tại</span>
+                        <span className="text-[10px] text-slate-500 font-medium">Số chai còn lại</span>
                         <div className="font-bold font-mono text-emerald-900 text-sm mt-0.5">
-                          {scannedBottle.currentVolume} {scannedBottle.unit}
+                          {availableBottlesForChem.length} chai
                         </div>
                       </div>
 
                       <div className="p-2 bg-white rounded-xl border border-emerald-100">
-                        <span className="text-[10px] text-slate-500 font-medium">Ban đầu</span>
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          {scannedBottle ? 'Dung tích chai' : 'Tổng tồn kho'}
+                        </span>
                         <div className="font-bold font-mono text-slate-700 text-sm mt-0.5">
-                          {scannedBottle.initialVolume} {scannedBottle.unit}
+                          {scannedBottle
+                            ? `${scannedBottle.currentVolume} ${scannedBottle.unit}`
+                            : `${getChemicalTotalStock(scannedChemical.id).total} ${scannedChemical.primaryUnit}`}
                         </div>
                       </div>
 
                       <div className="p-2 bg-white rounded-xl border border-emerald-100">
                         <span className="text-[10px] text-slate-500 font-medium">Vị trí</span>
-                        <div className="font-bold text-slate-800 text-xs mt-0.5 truncate" title={scannedBottle.location.cabinet}>
-                          {scannedBottle.location.cabinet}
+                        <div className="font-bold text-slate-800 text-xs mt-0.5 truncate" title={scannedBottle?.location?.cabinet || scannedChemical.storageLocation.cabinet}>
+                          {scannedBottle?.location?.cabinet || scannedChemical.storageLocation.cabinet}
                         </div>
                       </div>
 
                       <div className="p-2 bg-white rounded-xl border border-emerald-100">
-                        <span className="text-[10px] text-slate-500 font-medium">Hạn sử dụng</span>
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          {scannedBottle ? 'Hạn sử dụng' : 'Trạng thái kho'}
+                        </span>
                         <div className="font-bold font-mono text-slate-800 text-xs mt-0.5">
-                          {scannedBottle.expiryDate}
+                          {scannedBottle ? scannedBottle.expiryDate : availableBottlesForChem.length > 0 ? 'Còn hàng' : 'Hết hàng'}
                         </div>
                       </div>
                     </div>
@@ -940,6 +975,27 @@ export const RecordUsageModal: React.FC<Props> = ({
                     </option>
                   ))}
                 </select>
+
+                {/* Cách 1: Tóm tắt trạng thái loại hóa chất */}
+                {chemicalId && (
+                  <div className="mt-2 p-2.5 bg-cyan-50/70 border border-cyan-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 font-medium">Trạng thái kho (Cách 1): </span>
+                      <strong className="text-cyan-950 font-bold">
+                        Còn {availableBottlesForChem.length} chai
+                      </strong>
+                      <span className="text-slate-500"> · Tổng tồn: </span>
+                      <strong className="text-slate-900 font-mono">
+                        {getChemicalTotalStock(chemicalId).total} {unit}
+                      </strong>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      availableBottlesForChem.length > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {availableBottlesForChem.length > 0 ? '✓ Đang còn hàng' : '✕ Hết hàng'}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Bottle Picker */}
@@ -984,68 +1040,234 @@ export const RecordUsageModal: React.FC<Props> = ({
           {/* ======================================================== */}
           {/* COMMON INPUT FIELDS: QUANTITY, PREVIEW, PURPOSE */}
           {/* ======================================================== */}
-          {(activeBottle || selectionMode === 'MANUAL') && (
+          {(activeBottle || selectionMode === 'MANUAL' || activeChemical) && (
             <div className="space-y-4 pt-2 border-t border-slate-200">
-              {/* Quantity Input with Real-time Preview (Requirements 7 & 8) */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Số lượng sử dụng ({bottleUnit}) <span className="text-rose-500">*</span>
-                  </label>
-                  {activeBottle && (
-                    <span className="text-[11px] font-mono text-slate-500">
-                      Tồn hiện tại: <strong className="text-slate-800">{currentBottleVol} {bottleUnit}</strong>
-                    </span>
-                  )}
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    placeholder="Nhập số lượng, vd: 100"
-                    className="w-full pl-3.5 pr-14 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-600 outline-hidden"
-                  />
-                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-slate-500">
-                    {bottleUnit}
-                  </span>
-                </div>
-
-                {/* Stock Deduction Preview (Requirement 8) */}
-                {activeBottle && (
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 text-xs">
-                    <div className="p-2 bg-white rounded-xl border border-slate-200 text-center">
-                      <span className="text-[10px] text-slate-400">Tồn trước</span>
-                      <div className="font-bold font-mono text-slate-700 mt-0.5">
-                        {currentBottleVol} {bottleUnit}
-                      </div>
-                    </div>
-
-                    <div className="p-2 bg-white rounded-xl border border-slate-200 text-center">
-                      <span className="text-[10px] text-slate-400">Sử dụng</span>
-                      <div className="font-bold font-mono text-rose-600 mt-0.5">
-                        -{parsedQty || 0} {bottleUnit}
-                      </div>
-                    </div>
-
+              {/* Cách 1: Tùy chọn Dùng hết 1 chai (Hao trọn chai) */}
+              <div
+                className={`p-3.5 rounded-2xl border transition-all ${
+                  useFullBottle
+                    ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-400/20 shadow-xs'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
                     <div
-                      className={`p-2 rounded-xl border text-center transition-colors ${
-                        isInsufficientStock
-                          ? 'bg-rose-50 border-rose-200 text-rose-700'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      className={`p-2 rounded-xl text-white mt-0.5 transition-colors ${
+                        useFullBottle ? 'bg-amber-600 shadow-xs' : 'bg-slate-400'
                       }`}
                     >
-                      <span className="text-[10px] opacity-75">Tồn sau</span>
-                      <div className="font-bold font-mono mt-0.5">
-                        {isInsufficientStock ? 'KHÔNG ĐỦ' : `${stockRemainingAfter} ${bottleUnit}`}
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 flex flex-wrap items-center gap-1.5">
+                        <span>Tùy chọn: Dùng hết 1 chai</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-bold">
+                          Cách 1: Không cần nhập số mL
+                        </span>
                       </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {useFullBottle
+                          ? `Đang bật: Hệ thống tự động trừ trọn 1 chai (${targetBottleVolume} ${bottleUnit}) và ${emptyBottleAction === 'ARCHIVE' ? 'chuyển vào Kho Lưu Trữ (Archive)' : 'đánh dấu trạng thái chai là EMPTY'}.`
+                          : `Bật tùy chọn này để dùng trọn 1 chai mà không cần phải cân đo hay nhập lượng dùng.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={useFullBottle}
+                      onChange={(e) => setUseFullBottle(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                  </label>
+                </div>
+
+                {/* Tùy chọn xử lý chai sau khi dùng hết: EMPTY hoặc ARCHIVE */}
+                {useFullBottle && (
+                  <div className="mt-3 pt-3 border-t border-amber-200/70 space-y-2">
+                    <label className="block text-[11px] font-bold text-amber-950 uppercase tracking-wider">
+                      Xử lý trạng thái chai sau khi dùng:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEmptyBottleAction('EMPTY')}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                          emptyBottleAction === 'EMPTY'
+                            ? 'bg-white border-amber-500 ring-2 ring-amber-400/30 shadow-xs'
+                            : 'bg-white/70 border-amber-200 hover:bg-white text-slate-600'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                            emptyBottleAction === 'EMPTY' ? 'border-amber-600 bg-amber-600' : 'border-slate-300'
+                          }`}
+                        >
+                          {emptyBottleAction === 'EMPTY' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                            <span>Đánh dấu ĐÃ HẾT (EMPTY)</span>
+                            <span className="px-1.5 py-0.2 rounded text-[9px] bg-slate-100 text-slate-700 font-bold border border-slate-200">
+                              Mặc định
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                            Trừ tồn kho về 0, chuyển trạng thái sang EMPTY và vẫn theo dõi trong danh mục chai.
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEmptyBottleAction('ARCHIVE')}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                          emptyBottleAction === 'ARCHIVE'
+                            ? 'bg-white border-amber-500 ring-2 ring-amber-400/30 shadow-xs'
+                            : 'bg-white/70 border-amber-200 hover:bg-white text-slate-600'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                            emptyBottleAction === 'ARCHIVE' ? 'border-amber-600 bg-amber-600' : 'border-slate-300'
+                          }`}
+                        >
+                          {emptyBottleAction === 'ARCHIVE' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                            <span>Chuyển vào Kho Lưu Trữ (Archive)</span>
+                            <span className="px-1.5 py-0.2 rounded text-[9px] bg-purple-100 text-purple-700 font-bold border border-purple-200">
+                              Lưu trữ
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                            Đưa chai thẳng vào Archive Center để dọn sạch danh mục hoạt động.
+                          </p>
+                        </div>
+                      </button>
                     </div>
                   </div>
                 )}
               </div>
+
+              {/* Quantity Input with Real-time Preview (Requirements 7 & 8) */}
+              {!useFullBottle ? (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Số lượng sử dụng ({bottleUnit}) <span className="text-rose-500">*</span>
+                    </label>
+                    {activeBottle && (
+                      <span className="text-[11px] font-mono text-slate-500">
+                        Tồn hiện tại: <strong className="text-slate-800">{currentBottleVol} {bottleUnit}</strong>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      placeholder="Nhập số lượng, vd: 100"
+                      className="w-full pl-3.5 pr-14 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl bg-white text-slate-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-600 outline-hidden"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-slate-500">
+                      {bottleUnit}
+                    </span>
+                  </div>
+
+                  {/* Stock Deduction Preview (Requirement 8) */}
+                  {activeBottle && (
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 text-xs">
+                      <div className="p-2 bg-white rounded-xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-400">Tồn trước</span>
+                        <div className="font-bold font-mono text-slate-700 mt-0.5">
+                          {currentBottleVol} {bottleUnit}
+                        </div>
+                      </div>
+
+                      <div className="p-2 bg-white rounded-xl border border-slate-200 text-center">
+                        <span className="text-[10px] text-slate-400">Sử dụng</span>
+                        <div className="font-bold font-mono text-rose-600 mt-0.5">
+                          -{parsedQty || 0} {bottleUnit}
+                        </div>
+                      </div>
+
+                      <div
+                        className={`p-2 rounded-xl border text-center transition-colors ${
+                          isInsufficientStock
+                            ? 'bg-rose-50 border-rose-200 text-rose-700'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        }`}
+                      >
+                        <span className="text-[10px] opacity-75">Tồn sau</span>
+                        <div className="font-bold font-mono mt-0.5">
+                          {isInsufficientStock ? 'KHÔNG ĐỦ' : `${stockRemainingAfter} ${bottleUnit}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Full Bottle Usage Summary Preview */
+                <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Check className="w-4 h-4 text-amber-600" />
+                      <span>Xác nhận trừ trọn 1 chai</span>
+                    </span>
+                    <span className="font-mono text-[11px] text-amber-800 font-bold">
+                      Dung tích chai: {targetBottleVolume} {bottleUnit}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="p-2.5 bg-white rounded-xl border border-amber-100 text-center">
+                      <span className="text-[10px] text-slate-400">Số chai trước</span>
+                      <div className="font-bold font-mono text-slate-700 mt-0.5">
+                        {availableBottlesForChem.length || 1} chai
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 bg-white rounded-xl border border-amber-100 text-center">
+                      <span className="text-[10px] text-slate-400">Sử dụng</span>
+                      <div className="font-bold font-mono text-amber-700 mt-0.5">
+                        -1 chai ({targetBottleVolume} {bottleUnit})
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
+                      <span className="text-[10px] text-emerald-600">Số chai sau</span>
+                      <div className="font-bold font-mono text-emerald-800 mt-0.5">
+                        {Math.max(0, availableBottlesForChem.length - 1)} chai
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Trạng thái chai sau xử lý */}
+                  <div className="p-2.5 bg-white rounded-xl border border-amber-200 flex items-center justify-between text-xs">
+                    <span className="text-slate-600 font-medium">Trạng thái chai sau ghi nhận:</span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono ${
+                        emptyBottleAction === 'ARCHIVE'
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                          : 'bg-slate-100 text-slate-700 border border-slate-300'
+                      }`}
+                    >
+                      {emptyBottleAction === 'ARCHIVE'
+                        ? '📦 ARCHIVED (Đã lưu trữ)'
+                        : '⭕ EMPTY (0 mL - Đã hết)'}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Purpose & Project (Requirement 12) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1131,11 +1353,13 @@ export const RecordUsageModal: React.FC<Props> = ({
               className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer ${
                 hasBlocker
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60'
+                  : useFullBottle
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200'
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200'
               }`}
             >
               <Check className="w-4 h-4" />
-              <span>Xác nhận ghi sử dụng</span>
+              <span>{useFullBottle ? 'Xác nhận dùng hết 1 chai' : 'Xác nhận ghi sử dụng'}</span>
             </button>
           </div>
         </form>

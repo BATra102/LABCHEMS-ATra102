@@ -380,7 +380,47 @@ export const QrScannerModal: React.FC<Props> = ({
           return;
         }
 
-        // 4. Bottle NOT Found in Database -> Requirement 4
+        // 4. Check if code matches Chemical / Catalog Number / Barcode (Cách 1)
+        const chemMatch = chemicals.find(
+          (c) =>
+            c.code.toLowerCase() === targetLower ||
+            c.id.toLowerCase() === targetLower ||
+            c.casNumber.toLowerCase() === targetLower ||
+            (c.catalogNumber && c.catalogNumber.toLowerCase() === targetLower) ||
+            c.name.toLowerCase() === targetLower ||
+            c.englishName.toLowerCase() === targetLower
+        );
+
+        if (chemMatch) {
+          const chemBottles = bottles.filter(
+            (b) => b.chemicalId === chemMatch.id && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED' && b.currentVolume > 0
+          );
+          const firstBottle = chemBottles[0] || null;
+
+          setMatchedChemical(chemMatch);
+          setMatchedBottle(firstBottle);
+          if (firstBottle) {
+            setAdjustQuantity(String(firstBottle.currentVolume));
+          }
+
+          logQrScan({
+            qrId: cleanIdent,
+            bottleId: firstBottle?.id,
+            bottleCode: firstBottle?.bottleCode || chemMatch.code,
+            chemicalId: chemMatch.id,
+            chemicalName: chemMatch.name,
+            actionTaken: 'VIEW',
+          });
+
+          setTimeout(() => {
+            setIsSearching(false);
+            setCurrentView('BOTTLE_DETAIL');
+            stopCamera();
+          }, 250);
+          return;
+        }
+
+        // 5. Bottle & Chemical NOT Found in Database -> Requirement 4
         setTimeout(() => {
           setIsSearching(false);
           setMatchedBottle(null);
@@ -654,6 +694,47 @@ export const QrScannerModal: React.FC<Props> = ({
       }, 2500);
     } catch (err: any) {
       setUsageError(err.message || 'Không thể thực hiện xuất kho.');
+    } finally {
+      setIsSubmittingUsage(false);
+    }
+  };
+
+  // Execute Quick Use Full Bottle (Cách 1: Trừ trọn 1 chai)
+  const handleExecuteQuickUseFullBottle = async () => {
+    if (!matchedChemical) return;
+    setUsageError(null);
+    setUsageSuccess(null);
+    setIsSubmittingUsage(true);
+
+    try {
+      const res = recordUsage({
+        chemicalId: matchedChemical.id,
+        bottleId: matchedBottle?.id,
+        useFullBottle: true,
+        date: new Date().toISOString().split('T')[0],
+        purpose: 'Dùng hết 1 chai',
+        notes: '[Cách 1] Dùng hết 1 chai',
+        source: 'QR_SCAN',
+      });
+
+      if (!res.success) {
+        setUsageError(res.message);
+      } else {
+        setUsageSuccess(res.message);
+        if (matchedBottle) {
+          setMatchedBottle({
+            ...matchedBottle,
+            currentVolume: 0,
+            status: 'EMPTY',
+          });
+        }
+        setTimeout(() => {
+          setActiveActionTab('NONE');
+          setUsageSuccess(null);
+        }, 2500);
+      }
+    } catch (err: any) {
+      setUsageError(err.message || 'Lỗi khi ghi nhận dùng hết chai');
     } finally {
       setIsSubmittingUsage(false);
     }
@@ -1459,16 +1540,30 @@ export const QrScannerModal: React.FC<Props> = ({
 
                 {/* 3. Xuất kho / Ghi sử dụng */}
                 {!isExpired && !isEmpty && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveActionTab(activeActionTab === 'USAGE' ? 'NONE' : 'USAGE')
-                    }
-                    className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <FlaskConical className="w-4 h-4" />
-                    <span>Xuất kho (Dùng)</span>
-                  </button>
+                  <>
+                    {/* Nút 1-chạm: Dùng hết 1 chai (Cách 1) */}
+                    <button
+                      type="button"
+                      disabled={isSubmittingUsage}
+                      onClick={handleExecuteQuickUseFullBottle}
+                      className="px-3.5 py-2 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Trừ trọn 1 chai khỏi kho mà không cần nhập số mL"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-800" />
+                      <span>⚡ Dùng hết 1 chai</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveActionTab(activeActionTab === 'USAGE' ? 'NONE' : 'USAGE')
+                      }
+                      className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FlaskConical className="w-4 h-4" />
+                      <span>Nhập số mL dùng</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>

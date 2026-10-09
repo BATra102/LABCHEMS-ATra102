@@ -36,17 +36,19 @@ export const ArchiveCenterModal: React.FC<Props> = ({
     isManager,
     currentUser,
     restoreChemical,
+    restoreBottle,
     deletionLogs,
     restoreLogs,
     getChemicalTotalStock,
   } = useLab();
 
-  const [activeTab, setActiveTab] = useState<'trash' | 'history'>('trash');
+  const [activeTab, setActiveTab] = useState<'trash' | 'bottles' | 'history'>('trash');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedChemForRestore, setSelectedChemForRestore] = useState<Chemical | null>(null);
   const [restoreReason, setRestoreReason] = useState('Khôi phục hoạt động sau khi kiểm tra lại');
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const [bottleRestoreSuccess, setBottleRestoreSuccess] = useState<string | null>(null);
 
   // Filter archived chemicals
   const archivedChemicals = useMemo(() => {
@@ -64,6 +66,24 @@ export const ArchiveCenterModal: React.FC<Props> = ({
         (c.code && c.code.toLowerCase().includes(q))
     );
   }, [archivedChemicals, searchTerm]);
+
+  // Filter archived bottles
+  const archivedBottles = useMemo(() => {
+    return bottles.filter((b) => b.status === 'ARCHIVED');
+  }, [bottles]);
+
+  const filteredArchivedBottles = useMemo(() => {
+    if (!searchTerm.trim()) return archivedBottles;
+    const q = searchTerm.toLowerCase();
+    return archivedBottles.filter((b) => {
+      const chem = chemicals.find((c) => c.id === b.chemicalId);
+      return (
+        b.bottleCode.toLowerCase().includes(q) ||
+        (chem && chem.name.toLowerCase().includes(q)) ||
+        (b.lotNumber && b.lotNumber.toLowerCase().includes(q))
+      );
+    });
+  }, [archivedBottles, searchTerm, chemicals]);
 
   // Combined Deletion and Restore History
   const combinedHistory = useMemo(() => {
@@ -177,6 +197,21 @@ export const ArchiveCenterModal: React.FC<Props> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('bottles')}
+              className={`py-3 px-3.5 text-xs font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+                activeTab === 'bottles'
+                  ? 'border-purple-600 text-purple-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Layers className="w-4 h-4 text-purple-600" />
+              <span>Chai đã lưu trữ</span>
+              <span className="px-2 py-0.5 text-[10px] font-mono rounded-full bg-purple-100 text-purple-800 font-bold">
+                {archivedBottles.length}
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('history')}
               className={`py-3 px-3.5 text-xs font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
                 activeTab === 'history'
@@ -192,14 +227,14 @@ export const ArchiveCenterModal: React.FC<Props> = ({
             </button>
           </div>
 
-          {activeTab === 'trash' && (
+          {(activeTab === 'trash' || activeTab === 'bottles') && (
             <div className="relative w-64">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Tìm hóa chất trong thùng rác..."
+                placeholder={activeTab === 'bottles' ? 'Tìm chai lưu trữ (Mã, hóa chất)...' : 'Tìm hóa chất trong thùng rác...'}
                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
               />
             </div>
@@ -374,6 +409,108 @@ export const ArchiveCenterModal: React.FC<Props> = ({
                                   <span>Khôi phục</span>
                                 </button>
                               </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'bottles' && (
+            <div>
+              {bottleRestoreSuccess && (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium">{bottleRestoreSuccess}</span>
+                </div>
+              )}
+
+              {filteredArchivedBottles.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <Layers className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-600">
+                    {searchTerm ? 'Không tìm thấy chai phù hợp' : 'Không có chai nào trong kho lưu trữ'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Các chai được chọn chuyển vào Kho Lưu Trữ sau khi dùng hết (Cách 1) hoặc do Quản lý xóa mềm sẽ xuất hiện tại đây.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold uppercase text-[10px] tracking-wider">
+                      <tr>
+                        <th className="py-3 px-4">Mã Chai</th>
+                        <th className="py-3 px-4">Hóa chất</th>
+                        <th className="py-3 px-3 text-right">Tồn lúc lưu trữ</th>
+                        <th className="py-3 px-3">Vị trí</th>
+                        <th className="py-3 px-3">Thời gian</th>
+                        <th className="py-3 px-4">Lý do lưu trữ</th>
+                        <th className="py-3 px-3 text-center">Trạng thái</th>
+                        <th className="py-3 px-4 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-800">
+                      {filteredArchivedBottles.map((b) => {
+                        const chem = chemicals.find((c) => c.id === b.chemicalId);
+                        return (
+                          <tr key={b.id} className="hover:bg-purple-50/40 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="font-mono font-bold text-slate-900">{b.bottleCode}</div>
+                              <div className="text-[10px] font-mono text-slate-400">
+                                Lô: {b.lotNumber || 'N/A'} · HSD: {b.expiryDate}
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-slate-900">{chem?.name || 'Hóa chất'}</div>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                CAS: {chem?.casNumber || 'N/A'}
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
+                              {b.currentVolume} {b.unit}
+                            </td>
+
+                            <td className="py-3 px-3 text-slate-600 text-[11px]">
+                              {b.location.cabinet} · Kệ {b.location.shelf}
+                            </td>
+
+                            <td className="py-3 px-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                              {b.archivedAt ? new Date(b.archivedAt).toLocaleString('vi-VN') : 'N/A'}
+                            </td>
+
+                            <td className="py-3 px-4 text-slate-600 max-w-xs truncate" title={b.archivedReason}>
+                              {b.archivedReason || 'Dùng hết 1 chai / Lưu trữ'}
+                            </td>
+
+                            <td className="py-3 px-3 text-center">
+                              <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-purple-100 text-purple-800 rounded-md border border-purple-200">
+                                ARCHIVED
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = restoreBottle(b.id);
+                                  if (res.success) {
+                                    setBottleRestoreSuccess(res.message);
+                                    setTimeout(() => setBottleRestoreSuccess(null), 3000);
+                                  }
+                                }}
+                                className="px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Khôi phục chai về danh mục theo dõi"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>Khôi phục chai</span>
+                              </button>
                             </td>
                           </tr>
                         );

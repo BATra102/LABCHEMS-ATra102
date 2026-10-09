@@ -105,6 +105,7 @@ function MainApp() {
   const [recordUsageOpen, setRecordUsageOpen] = useState(false);
   const [selectedChemForUsage, setSelectedChemForUsage] = useState<string | undefined>();
   const [selectedBottleForUsage, setSelectedBottleForUsage] = useState<string | undefined>();
+  const [usageUseFullBottle, setUsageUseFullBottle] = useState<boolean>(false);
 
   const [stockInOpen, setStockInOpen] = useState(false);
   const [selectedChemForStockIn, setSelectedChemForStockIn] = useState<string | undefined>();
@@ -492,9 +493,10 @@ function MainApp() {
   }, [isAuthenticated, activeTab]);
 
   // Handlers
-  const handleOpenRecordUsage = (chemicalId?: string, bottleId?: string) => {
+  const handleOpenRecordUsage = (chemicalId?: string, bottleId?: string, useFullBottle?: boolean) => {
     setSelectedChemForUsage(chemicalId);
     setSelectedBottleForUsage(bottleId);
+    setUsageUseFullBottle(Boolean(useFullBottle));
     setRecordUsageOpen(true);
   };
 
@@ -817,6 +819,7 @@ function MainApp() {
         onClose={() => setRecordUsageOpen(false)}
         preselectedChemicalId={selectedChemForUsage}
         preselectedBottleId={selectedBottleForUsage}
+        initialUseFullBottle={usageUseFullBottle}
       />
 
       <QrScannerModal
@@ -862,7 +865,7 @@ function MainApp() {
         bottle={selectedBottleForDetail}
         isOpen={bottleDetailOpen}
         onClose={() => setBottleDetailOpen(false)}
-        onRecordUsage={(bottleId, chemicalId) => handleOpenRecordUsage(chemicalId, bottleId)}
+        onRecordUsage={(bottleId, chemicalId, useFullBottle) => handleOpenRecordUsage(chemicalId, bottleId, useFullBottle)}
       />
 
       <UserProfileModal
