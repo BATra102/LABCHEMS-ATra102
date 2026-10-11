@@ -25,6 +25,7 @@ import {
   ShieldAlert,
   Archive,
   Info,
+  Barcode,
 } from 'lucide-react';
 
 interface Props {
@@ -33,6 +34,7 @@ interface Props {
   preselectedChemicalId?: string;
   preselectedBottleId?: string;
   initialUseFullBottle?: boolean;
+  onOpenSupermarketBarcode?: (mode?: 'STOCK_IN' | 'STOCK_OUT') => void;
 }
 
 const PRESET_PURPOSES = [
@@ -51,6 +53,7 @@ export const RecordUsageModal: React.FC<Props> = ({
   preselectedChemicalId,
   preselectedBottleId,
   initialUseFullBottle = false,
+  onOpenSupermarketBarcode,
 }) => {
   const {
     chemicals,
@@ -644,6 +647,21 @@ export const RecordUsageModal: React.FC<Props> = ({
               <Search className="w-3.5 h-3.5" />
               <span>🔎 Chọn thủ công</span>
             </button>
+
+            {onOpenSupermarketBarcode && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenSupermarketBarcode('STOCK_OUT');
+                }}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-cyan-700 bg-cyan-50 hover:bg-cyan-100 transition-colors cursor-pointer border border-cyan-200"
+                title="Quét lặp mã vạch xuất nhiều chai như siêu thị"
+              >
+                <Barcode className="w-3.5 h-3.5" />
+                <span>⚡ Quét lặp siêu thị</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono">

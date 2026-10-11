@@ -27,6 +27,8 @@ import { QrScannerModal } from './components/modals/QrScannerModal';
 import { ArchiveCenterModal } from './components/modals/ArchiveCenterModal';
 import { DeleteChemicalModal } from './components/modals/DeleteChemicalModal';
 import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
+import { SupermarketBarcodeModal } from './components/modals/SupermarketBarcodeModal';
+import { PdfReportModal } from './components/modals/PdfReportModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileMenuDrawer } from './components/modals/MobileMenuDrawer';
 import { Login } from './components/Login';
@@ -129,6 +131,24 @@ function MainApp() {
 
   const [selectedBottleForDetail, setSelectedBottleForDetail] = useState<Bottle | null>(null);
   const [bottleDetailOpen, setBottleDetailOpen] = useState(false);
+
+  // Supermarket Barcode Checkout Station states (Nhập lặp mã vạch / Xuất kho)
+  const [supermarketBarcodeOpen, setSupermarketBarcodeOpen] = useState(false);
+  const [supermarketBarcodeMode, setSupermarketBarcodeMode] = useState<'STOCK_IN' | 'STOCK_OUT'>('STOCK_IN');
+
+  const handleOpenSupermarketBarcode = useCallback((mode: 'STOCK_IN' | 'STOCK_OUT' = 'STOCK_IN') => {
+    setSupermarketBarcodeMode(mode);
+    setSupermarketBarcodeOpen(true);
+  }, []);
+
+  // PDF Report & Print Export states
+  const [pdfReportOpen, setPdfReportOpen] = useState(false);
+  const [pdfReportType, setPdfReportType] = useState<'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE'>('INVENTORY');
+
+  const handleOpenPdfReport = useCallback((type: 'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE' = 'INVENTORY') => {
+    setPdfReportType(type);
+    setPdfReportOpen(true);
+  }, []);
 
   // Search sync state
   const [inventorySearchTerm, setInventorySearchTerm] = useState<string>('');
@@ -626,6 +646,8 @@ function MainApp() {
         onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
         onSelectChemicalFromSearch={handleSelectChemicalFromSearch}
         onSearchSubmit={handleSearchSubmit}
+        onOpenSupermarketBarcode={handleOpenSupermarketBarcode}
+        onOpenPdfReport={handleOpenPdfReport}
       />
 
       {/* Main Container */}
@@ -693,6 +715,8 @@ function MainApp() {
                 externalSearchTerm={inventorySearchTerm}
                 targetChemicalId={targetChemicalId}
                 initialFilterStatus={inventoryInitialFilter}
+                onOpenSupermarketBarcode={handleOpenSupermarketBarcode}
+                onOpenPdfReport={handleOpenPdfReport}
               />
             )}
 
@@ -700,6 +724,8 @@ function MainApp() {
               <UsageView
                 onOpenRecordUsage={() => handleOpenRecordUsage()}
                 onOpenQrScanner={() => setQrScannerOpen(true)}
+                onOpenSupermarketBarcode={handleOpenSupermarketBarcode}
+                onOpenPdfReport={handleOpenPdfReport}
               />
             )}
 
@@ -820,6 +846,19 @@ function MainApp() {
         preselectedChemicalId={selectedChemForUsage}
         preselectedBottleId={selectedBottleForUsage}
         initialUseFullBottle={usageUseFullBottle}
+        onOpenSupermarketBarcode={handleOpenSupermarketBarcode}
+      />
+
+      <SupermarketBarcodeModal
+        isOpen={supermarketBarcodeOpen}
+        onClose={() => setSupermarketBarcodeOpen(false)}
+        initialMode={supermarketBarcodeMode}
+      />
+
+      <PdfReportModal
+        isOpen={pdfReportOpen}
+        onClose={() => setPdfReportOpen(false)}
+        initialType={pdfReportType}
       />
 
       <QrScannerModal
@@ -917,6 +956,8 @@ function MainApp() {
         onSignOut={handleSignOut}
         onOpenUserGuide={() => setUserGuideOpen(true)}
         onOpenArchiveCenter={handleOpenArchiveCenter}
+        onOpenSupermarketBarcode={handleOpenSupermarketBarcode}
+        onOpenPdfReport={handleOpenPdfReport}
       />
 
       {/* Mobile Fixed Bottom Navigation Bar */}

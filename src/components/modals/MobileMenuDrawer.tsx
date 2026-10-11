@@ -18,6 +18,8 @@ import {
   QrCode,
   Shield,
   FileSpreadsheet,
+  Barcode,
+  FileText,
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +34,8 @@ interface Props {
   onSignOut?: () => void;
   onOpenUserGuide?: () => void;
   onOpenArchiveCenter?: () => void;
+  onOpenSupermarketBarcode?: (mode: 'STOCK_IN' | 'STOCK_OUT') => void;
+  onOpenPdfReport?: (type?: 'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE') => void;
 }
 
 export const MobileMenuDrawer: React.FC<Props> = ({
@@ -46,6 +50,8 @@ export const MobileMenuDrawer: React.FC<Props> = ({
   onSignOut,
   onOpenUserGuide,
   onOpenArchiveCenter,
+  onOpenSupermarketBarcode,
+  onOpenPdfReport,
 }) => {
   const { currentUser, isManager, pendingUsersCount, purchaseItems } = useLab();
   const pendingPurchasesCount = purchaseItems.filter((p) => p.status === 'PENDING').length;
@@ -131,6 +137,45 @@ export const MobileMenuDrawer: React.FC<Props> = ({
             <FlaskConical className="w-4 h-4 text-cyan-600" />
             <span>Kho hóa chất</span>
           </button>
+
+          {onOpenSupermarketBarcode && (
+            <>
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenSupermarketBarcode('STOCK_IN');
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200"
+              >
+                <Barcode className="w-4 h-4 text-emerald-600" />
+                <span>⚡ Quét mã nhập kho</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenSupermarketBarcode('STOCK_OUT');
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold text-cyan-800 bg-cyan-50 hover:bg-cyan-100 transition-colors border border-cyan-200"
+              >
+                <FlaskConical className="w-4 h-4 text-cyan-600" />
+                <span>⚡ Quét mã sử dụng hóa chất</span>
+              </button>
+            </>
+          )}
+
+          {onOpenPdfReport && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenPdfReport('INVENTORY');
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold text-slate-800 bg-white hover:bg-slate-50 transition-colors border border-slate-300 shadow-2xs"
+            >
+              <FileText className="w-4 h-4 text-cyan-700" />
+              <span>📄 Xuất báo cáo PDF & In ấn</span>
+            </button>
+          )}
 
           <button
             onClick={() => {

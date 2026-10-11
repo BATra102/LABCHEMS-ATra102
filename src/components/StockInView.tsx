@@ -1,14 +1,20 @@
 import React, { useMemo } from 'react';
 import { useLab } from '../context/LabContext';
-import { Plus, Download, Truck, PackageCheck, MapPin, Calendar, FileSpreadsheet, QrCode } from 'lucide-react';
+import { Plus, Download, Truck, PackageCheck, MapPin, Calendar, FileSpreadsheet, QrCode, Barcode } from 'lucide-react';
 
 interface Props {
   onOpenStockIn: (chemicalId?: string) => void;
   onOpenExcelImport?: () => void;
   onOpenQrScanner?: () => void;
+  onOpenSupermarketBarcode?: (mode?: 'STOCK_IN' | 'STOCK_OUT') => void;
 }
 
-export const StockInView: React.FC<Props> = ({ onOpenStockIn, onOpenExcelImport, onOpenQrScanner }) => {
+export const StockInView: React.FC<Props> = ({
+  onOpenStockIn,
+  onOpenExcelImport,
+  onOpenQrScanner,
+  onOpenSupermarketBarcode,
+}) => {
   const { transactions, chemicals, bottles, isManager } = useLab();
 
   const stockInTransactions = useMemo(() => {
@@ -44,6 +50,16 @@ export const StockInView: React.FC<Props> = ({ onOpenStockIn, onOpenExcelImport,
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
               <span>📥 Nhập Danh Sách (Excel / Sheets)</span>
+            </button>
+          )}
+          {onOpenSupermarketBarcode && (
+            <button
+              onClick={() => onOpenSupermarketBarcode('STOCK_IN')}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg transition-all flex items-center gap-1.5 shadow-sm hover:shadow-emerald-500/20 cursor-pointer active:scale-95"
+              title="Quét mã nhập kho: Quét lặp mã vạch / QR tự động cộng tồn kho"
+            >
+              <Barcode className="w-4 h-4 text-emerald-200" />
+              <span>Quét mã nhập kho</span>
             </button>
           )}
           <button

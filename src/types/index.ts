@@ -270,6 +270,7 @@ export interface Chemical {
   primaryUnit: ChemicalUnit;
   manufacturer: string;
   catalogNumber?: string;
+  barcode?: string;
   minimumStock: number; // Critical threshold (<= minStock -> CRITICAL)
   warningStock: number; // Low stock threshold (<= warnStock -> LOW_STOCK)
   targetStock: number;  // Used for target stock purchase calculation
@@ -374,6 +375,25 @@ export interface StockDiscrepancyReport {
   resolutionNotes?: string;
 }
 
+export interface ArchivedPeriodicReport {
+  id: string;
+  code: string; // e.g. "BC-2026-10-W1", "BC-2026-M10"
+  title: string;
+  reportType: 'INVENTORY' | 'TRANSACTIONS' | 'PERIODIC_SUMMARY';
+  period: 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'CUSTOM';
+  startDate?: string;
+  endDate?: string;
+  createdAt: string;
+  createdBy: string;
+  createdById?: string;
+  totalItems: number;
+  totalTransactions?: number;
+  totalVolumeIn?: number;
+  totalVolumeOut?: number;
+  summaryNotes?: string;
+  contentSnapshot?: string;
+}
+
 export interface LabNotification {
   id: string;
   timestamp: string;
@@ -438,7 +458,7 @@ export interface AuditLog {
   timestamp: string;
   user: string;
   action: string;
-  entityType: 'CHEMICAL' | 'BOTTLE' | 'TRANSACTION' | 'PURCHASE' | 'SETTINGS' | 'USER' | 'ADJUSTMENT' | 'DISCREPANCY' | 'IMPORT' | 'REQUEST';
+  entityType: 'CHEMICAL' | 'BOTTLE' | 'TRANSACTION' | 'PURCHASE' | 'SETTINGS' | 'USER' | 'ADJUSTMENT' | 'DISCREPANCY' | 'IMPORT' | 'REQUEST' | 'REPORT';
   entityId: string;
   previousData?: string;
   newData?: string;

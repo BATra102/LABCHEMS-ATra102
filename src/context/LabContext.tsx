@@ -24,9 +24,11 @@ import {
   UserPermissions,
   ApprovalRequest,
   StorageCabinet,
+  StorageLocation,
   QrScanLog,
   DeletionLog,
   RestoreLog,
+  ArchivedPeriodicReport,
 } from '../types';
 import {
   DEMO_CHEMICALS,
@@ -166,6 +168,40 @@ interface LabContextType {
     existingBottleId?: string;
   }) => { success: boolean; message: string; bottleId?: string; limitExceeded?: boolean };
 
+  // Supermarket-style Multi-scan Barcode Stock In & Stock Out
+  batchStockInByBarcode: (params: {
+    items: Array<{
+      chemicalId: string;
+      barcode?: string;
+      bottleCount: number;
+      volumePerBottle?: number;
+      unit: ChemicalUnit;
+      lotNumber?: string;
+      expiryDate?: string;
+      storageLocation?: StorageLocation;
+      supplier?: string;
+      notes?: string;
+    }>;
+    sessionId?: string;
+  }) => { success: boolean; message: string; totalBottlesAdded?: number };
+
+  batchStockOutByBarcode: (params: {
+    items: Array<{
+      chemicalId: string;
+      bottleId?: string;
+      barcode?: string;
+      bottleCount: number;
+      isPartial?: boolean;
+      partialQuantity?: number;
+      unit: ChemicalUnit;
+      project?: string;
+      purpose?: string;
+      recipient?: string;
+      notes?: string;
+    }>;
+    sessionId?: string;
+  }) => { success: boolean; message: string; totalBottlesExported?: number };
+
   // Reversal / Void transaction (Manager only)
   reverseTransaction: (transactionId: string, reason: string) => { success: boolean; message: string };
 
@@ -191,6 +227,15 @@ interface LabContextType {
     unit: ChemicalUnit;
     reason: string;
   }) => { success: boolean; message: string };
+
+  // Archived Periodic Reports & PDF Exports
+  archivedReports: ArchivedPeriodicReport[];
+  saveArchivedReport: (report: Omit<ArchivedPeriodicReport, 'id' | 'createdAt'>) => {
+    success: boolean;
+    message: string;
+    reportId?: string;
+  };
+  deleteArchivedReport: (id: string) => { success: boolean; message: string };
 
   // Notifications & Email alerts
   notifications: LabNotification[];
@@ -481,6 +526,49 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return [];
   });
+
+  // 8. Archived Periodic Reports (Báo cáo định kỳ & PDF)
+  const [archivedReports, setArchivedReports] = useState<ArchivedPeriodicReport[]>(() => {
+    const saved = localStorage.getItem(`${STORAGE_KEY}_archived_reports`);
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    }
+    return [
+      {
+        id: 'rep-init-001',
+        code: 'BC-TK-20261001-001',
+        title: 'Báo cáo Kiểm kê Tồn kho Định kỳ Tháng 10/2026',
+        reportType: 'INVENTORY',
+        period: 'MONTHLY',
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+        createdAt: '2026-10-01T08:30:00.000Z',
+        createdBy: 'Admin Lab Manager',
+        totalItems: 8,
+        summaryNotes: 'Kiểm kê định kỳ đầu tháng 10: Toàn bộ hóa chất đạt yêu cầu bảo quản tại tủ Cabinet C1 và C2.',
+      },
+      {
+        id: 'rep-init-002',
+        code: 'BC-GD-20261008-002',
+        title: 'Báo cáo Tổng hợp Xuất Nhập Tuần 40/2026',
+        reportType: 'TRANSACTIONS',
+        period: 'WEEKLY',
+        startDate: '2026-10-01',
+        endDate: '2026-10-07',
+        createdAt: '2026-10-08T16:00:00.000Z',
+        createdBy: 'Admin Lab Manager',
+        totalItems: 5,
+        totalTransactions: 5,
+        totalVolumeIn: 1000,
+        totalVolumeOut: 150,
+        summaryNotes: 'Báo cáo giao dịch tuần: Đã hoàn tất nhập bổ sung dung môi và ghi nhận tiêu hao đề tài chiết xuất.',
+      },
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY}_archived_reports`, JSON.stringify(archivedReports));
+  }, [archivedReports]);
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY}_suppliers`, JSON.stringify(suppliers));
@@ -2726,6 +2814,448 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
   };
 
   // =========================================================================
+  // SUPERMARKET BATCH STOCK IN BY BARCODE
+  // (Quét lặp mã vạch cập nhật tồn kho tương tự máy quét siêu thị)
+  // =========================================================================
+  const batchStockInByBarcode = ({
+    items,
+  }: {
+    items: Array<{
+      chemicalId: string;
+      barcode?: string;
+      bottleCount: number;
+      volumePerBottle?: number;
+      unit: ChemicalUnit;
+      lotNumber?: string;
+      expiryDate?: string;
+      storageLocation?: StorageLocation;
+      supplier?: string;
+      notes?: string;
+    }>;
+    sessionId?: string;
+  }) => {
+    const canStockIn = isManager || currentUser.permissions?.createStockIn;
+    if (!canStockIn) {
+      return { success: false, message: 'ACCESS DENIED: Tài khoản của bạn không có quyền nhập kho hóa chất.' };
+    }
+
+    if (!items || items.length === 0) {
+      return { success: false, message: 'Danh sách quét mã vạch trống.' };
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    let updatedBottlesList = [...bottles];
+    let updatedChemicalsList = [...chemicals];
+    const newTransactions: InventoryTransaction[] = [];
+    let grandTotalBottles = 0;
+
+    for (const item of items) {
+      const chem = updatedChemicalsList.find((c) => c.id === item.chemicalId);
+      if (!chem) continue;
+      if (chem.status === 'ARCHIVED') {
+        return { success: false, message: `Hóa chất "${chem.name}" đã bị lưu trữ (ARCHIVED). Cần khôi phục trước khi nhập kho.` };
+      }
+
+      const count = Math.max(1, Math.floor(item.bottleCount || 1));
+      grandTotalBottles += count;
+
+      const volPerBottle = item.volumePerBottle && item.volumePerBottle > 0
+        ? item.volumePerBottle
+        : (chem.primaryUnit === 'bottle' || chem.primaryUnit === 'vial' || chem.primaryUnit === 'tube' ? 1 : 500);
+
+      const effectiveUnit = item.unit || chem.primaryUnit;
+      const effectiveExpiry = item.expiryDate || new Date(Date.now() + 730 * 86400000).toISOString().split('T')[0];
+      const effectiveLot = item.lotNumber?.trim() || `LOT-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+      const effectiveLoc = item.storageLocation || chem.storageLocation;
+      const cleanBarcode = item.barcode?.trim() || chem.barcode || chem.code;
+
+      // Tính tổng tồn trước khi nhập
+      let prevTotal = 0;
+      for (const b of updatedBottlesList) {
+        if (b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED') {
+          const conv = convertUnit(b.currentVolume, b.unit, chem.primaryUnit);
+          if (conv !== null) prevTotal += conv;
+        }
+      }
+      prevTotal = Math.round(prevTotal * 10000) / 10000;
+
+      // Tạo các chai mới theo số lượng quét mà KHÔNG tạo QR code hoặc mã chai nội bộ
+      const createdBottlesForChem: Bottle[] = [];
+      const existingChemBottles = updatedBottlesList.filter(b => b.chemicalId === chem.id);
+      const startNum = existingChemBottles.length;
+
+      for (let i = 0; i < count; i++) {
+        const bottleUuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `bot-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}-${i}`;
+
+        const codePrefix = chem.code ? chem.code.split('-')[0].trim().toUpperCase() : 'CHEM';
+        const bottleNumber = startNum + i + 1;
+        const autoBottleCode = `${codePrefix}-${String(bottleNumber).padStart(3, '0')}`;
+
+        const newBottle: Bottle = {
+          id: bottleUuid,
+          chemicalId: chem.id,
+          bottleCode: autoBottleCode,
+          barcode: cleanBarcode,
+          lotNumber: effectiveLot,
+          initialVolume: volPerBottle,
+          currentVolume: volPerBottle,
+          unit: effectiveUnit,
+          expiryDate: effectiveExpiry,
+          receivedDate: todayStr,
+          location: effectiveLoc,
+          status: 'FULL',
+          notes: item.notes || `Nhập kho theo quét lặp mã vạch: ${cleanBarcode}`,
+        };
+
+        createdBottlesForChem.push(newBottle);
+      }
+
+      updatedBottlesList = [...createdBottlesForChem, ...updatedBottlesList];
+
+      // Gán mã vạch cho hóa chất nếu chưa có để các lần quét sau tự động nhận diện
+      if (!chem.barcode && cleanBarcode) {
+        updatedChemicalsList = updatedChemicalsList.map(c =>
+          c.id === chem.id ? { ...c, barcode: cleanBarcode } : c
+        );
+      }
+
+      // Tính tổng tồn mới sau khi cộng thêm các chai
+      let newTotal = 0;
+      for (const b of updatedBottlesList) {
+        if (b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED') {
+          const conv = convertUnit(b.currentVolume, b.unit, chem.primaryUnit);
+          if (conv !== null) newTotal += conv;
+        }
+      }
+      newTotal = Math.round(newTotal * 10000) / 10000;
+
+      const addedQty = count * volPerBottle;
+      const txId = `tx-barcode-in-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const tx: InventoryTransaction = {
+        id: txId,
+        timestamp: new Date().toISOString(),
+        date: todayStr,
+        type: 'STOCK_IN',
+        chemicalId: chem.id,
+        chemicalName: chem.name,
+        quantity: addedQty,
+        unit: effectiveUnit,
+        previousStock: prevTotal,
+        newStock: newTotal,
+        user: currentUser.name,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        source: 'MANUAL',
+        notes: `Quét mã vạch nhập kho (${count} chai × ${volPerBottle} ${effectiveUnit}). Lô: ${effectiveLot}, HSD: ${effectiveExpiry}. Mã vạch: ${cleanBarcode}`,
+      };
+
+      newTransactions.push(tx);
+
+      logAudit(
+        'STOCK IN (BARCODE BATCH)',
+        'CHEMICAL',
+        chem.id,
+        `${currentUser.name} quét mã vạch [${cleanBarcode}] nhập +${count} chai (${chem.name}, Lô: ${effectiveLot}). Tổng tồn: ${newTotal} ${chem.primaryUnit}.`
+      );
+
+      if (isSupabaseConfigured()) {
+        createdBottlesForChem.forEach(b => {
+          bottleService.insert(b).catch(err => console.warn('Supabase batch bottle insert notice:', err));
+        });
+
+        supabase.from('stock_transactions').insert({
+          chemical_id: chem.id,
+          chemical_name: chem.name,
+          user_id: currentUser.id,
+          user_name: currentUser.name,
+          transaction_type: 'IMPORT',
+          quantity: addedQty,
+          unit: effectiveUnit,
+          quantity_before: prevTotal,
+          quantity_after: newTotal,
+          reference_id: txId,
+          notes: `Quét mã vạch nhập kho siêu thị: +${count} chai (Lô: ${effectiveLot})`,
+        }).then(() => {});
+      }
+    }
+
+    setBottles(updatedBottlesList);
+    setChemicals(updatedChemicalsList);
+    setTransactions(prev => [...newTransactions, ...prev]);
+
+    // Đồng bộ danh mục mua sắm nếu tồn kho vượt qua ngưỡng cảnh báo
+    updatedChemicalsList.forEach(c => {
+      let stock = 0;
+      for (const b of updatedBottlesList) {
+        if (b.chemicalId === c.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED') {
+          const conv = convertUnit(b.currentVolume, b.unit, c.primaryUnit);
+          if (conv !== null) stock += conv;
+        }
+      }
+      setPurchaseItems(prev => syncPurchaseItemForChemical(c, stock, prev));
+    });
+
+    return {
+      success: true,
+      message: `Đã nhập kho thành công ${grandTotalBottles} chai cho ${items.length} loại hóa chất. Tồn kho đã được cộng thêm chính xác.`,
+      totalBottlesAdded: grandTotalBottles,
+    };
+  };
+
+  // =========================================================================
+  // SUPERMARKET BATCH STOCK OUT BY BARCODE
+  // (Quét lặp mã vạch xuất kho / ghi sử dụng nhiều chai tương tự siêu thị)
+  // =========================================================================
+  const batchStockOutByBarcode = ({
+    items,
+  }: {
+    items: Array<{
+      chemicalId: string;
+      bottleId?: string;
+      barcode?: string;
+      bottleCount: number;
+      isPartial?: boolean;
+      partialQuantity?: number;
+      unit: ChemicalUnit;
+      project?: string;
+      purpose?: string;
+      recipient?: string;
+      notes?: string;
+    }>;
+    sessionId?: string;
+  }) => {
+    const canUse = currentUser.permissions?.recordUsage !== false;
+    if (!canUse) {
+      return { success: false, message: 'ACCESS DENIED: Tài khoản của bạn không có quyền xuất kho / ghi sử dụng.' };
+    }
+
+    if (!items || items.length === 0) {
+      return { success: false, message: 'Danh sách quét xuất kho trống.' };
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    let updatedBottlesList = [...bottles];
+    const newTransactions: InventoryTransaction[] = [];
+    let grandTotalExported = 0;
+
+    // Kiểm tra tồn kho trước khi thực hiện để đảm bảo không xuất vượt quá tồn kho hiện có
+    for (const item of items) {
+      const chem = chemicals.find(c => c.id === item.chemicalId);
+      if (!chem) continue;
+
+      const activeBottles = updatedBottlesList.filter(
+        b => b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED'
+      );
+
+      if (item.isPartial && item.partialQuantity && item.partialQuantity > 0) {
+        // Kiểm tra tổng dung tích/khối lượng còn lại
+        let totalAvail = 0;
+        for (const b of activeBottles) {
+          const conv = convertUnit(b.currentVolume, b.unit, item.unit);
+          if (conv !== null) totalAvail += conv;
+        }
+        if (item.partialQuantity > totalAvail) {
+          return {
+            success: false,
+            message: `Lượng xuất của hóa chất "${chem.name}" (${item.partialQuantity} ${item.unit}) vượt quá tổng lượng tồn kho (${totalAvail} ${item.unit}).`,
+          };
+        }
+      } else {
+        const count = Math.max(1, Math.floor(item.bottleCount || 1));
+        if (count > activeBottles.length) {
+          return {
+            success: false,
+            message: `Số lượng xuất của hóa chất "${chem.name}" (${count} chai) vượt quá số lượng chai hiện có trong kho (${activeBottles.length} chai).`,
+          };
+        }
+      }
+    }
+
+    // Tiến hành trừ kho
+    for (const item of items) {
+      const chem = chemicals.find(c => c.id === item.chemicalId);
+      if (!chem) continue;
+
+      let prevTotal = 0;
+      for (const b of updatedBottlesList) {
+        if (b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED') {
+          const conv = convertUnit(b.currentVolume, b.unit, chem.primaryUnit);
+          if (conv !== null) prevTotal += conv;
+        }
+      }
+      prevTotal = Math.round(prevTotal * 10000) / 10000;
+
+      let totalDeductedVol = 0;
+      let targetBottleIdForTx: string | undefined = item.bottleId;
+      let targetBottleCodeForTx: string | undefined;
+
+      // TRƯỜNG HỢP 1: LẤY MỘT PHẦN HÓA CHẤT TRONG CHAI (theo g hoặc mL - KHÔNG trừ cả chai)
+      if (item.isPartial && item.partialQuantity && item.partialQuantity > 0) {
+        let remainingNeeded = item.partialQuantity;
+
+        // Nếu chỉ định đúng chai cụ thể (từ quét QR chai)
+        if (item.bottleId) {
+          const bIdx = updatedBottlesList.findIndex(b => b.id === item.bottleId);
+          if (bIdx >= 0) {
+            const targetB = updatedBottlesList[bIdx];
+            targetBottleCodeForTx = targetB.bottleCode;
+            const deductInBottleUnit = convertUnit(remainingNeeded, item.unit, targetB.unit) || remainingNeeded;
+            const newVol = Math.max(0, Math.round((targetB.currentVolume - deductInBottleUnit) * 10000) / 10000);
+            const newStatus = calculateBottleStatus(newVol, targetB.initialVolume, targetB.expiryDate, referenceDate);
+
+            updatedBottlesList[bIdx] = {
+              ...targetB,
+              currentVolume: newVol,
+              status: newStatus,
+              openedDate: targetB.openedDate || todayStr,
+            };
+
+            totalDeductedVol = deductInBottleUnit;
+            if (isSupabaseConfigured()) {
+              bottleService.updateQuantity(targetB.id, newVol, newStatus).catch(() => {});
+            }
+          }
+        } else {
+          // Trừ một phần theo FIFO các chai sớm hết hạn nhất
+          const eligibleBottles = updatedBottlesList
+            .filter(b => b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED')
+            .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+
+          for (const targetB of eligibleBottles) {
+            if (remainingNeeded <= 0) break;
+            const bIdx = updatedBottlesList.findIndex(b => b.id === targetB.id);
+            if (bIdx < 0) continue;
+
+            const availInReqUnit = convertUnit(targetB.currentVolume, targetB.unit, item.unit) || targetB.currentVolume;
+            const deductInReqUnit = Math.min(availInReqUnit, remainingNeeded);
+            const deductInBottleUnit = convertUnit(deductInReqUnit, item.unit, targetB.unit) || deductInReqUnit;
+
+            const newVol = Math.max(0, Math.round((targetB.currentVolume - deductInBottleUnit) * 10000) / 10000);
+            const newStatus = calculateBottleStatus(newVol, targetB.initialVolume, targetB.expiryDate, referenceDate);
+
+            updatedBottlesList[bIdx] = {
+              ...targetB,
+              currentVolume: newVol,
+              status: newStatus,
+              openedDate: targetB.openedDate || todayStr,
+            };
+
+            totalDeductedVol += deductInBottleUnit;
+            remainingNeeded -= deductInReqUnit;
+            targetBottleCodeForTx = targetB.bottleCode;
+
+            if (isSupabaseConfigured()) {
+              bottleService.updateQuantity(targetB.id, newVol, newStatus).catch(() => {});
+            }
+          }
+        }
+      } else {
+        // TRƯỜNG HỢP 2: LẤY NGUYÊN CHAI (Mặc định hoặc chọn nguyên chai)
+        const count = Math.max(1, Math.floor(item.bottleCount || 1));
+        grandTotalExported += count;
+
+        const eligibleBottles = updatedBottlesList
+          .filter(b => b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED')
+          .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime());
+
+        const bottlesToDeduct = eligibleBottles.slice(0, count);
+
+        bottlesToDeduct.forEach(targetB => {
+          totalDeductedVol += targetB.currentVolume;
+          targetBottleCodeForTx = targetB.bottleCode;
+          const bIdx = updatedBottlesList.findIndex(b => b.id === targetB.id);
+          if (bIdx >= 0) {
+            updatedBottlesList[bIdx] = {
+              ...updatedBottlesList[bIdx],
+              currentVolume: 0,
+              status: 'EMPTY',
+              disposedDate: todayStr,
+              disposalReason: 'Quét mã xuất dùng hết chai',
+            };
+            if (isSupabaseConfigured()) {
+              bottleService.updateQuantity(targetB.id, 0, 'EMPTY').catch(() => {});
+            }
+          }
+        });
+      }
+
+      let newTotal = 0;
+      for (const b of updatedBottlesList) {
+        if (b.chemicalId === chem.id && b.currentVolume > 0 && b.status !== 'ARCHIVED' && b.status !== 'DISPOSED') {
+          const conv = convertUnit(b.currentVolume, b.unit, chem.primaryUnit);
+          if (conv !== null) newTotal += conv;
+        }
+      }
+      newTotal = Math.round(newTotal * 10000) / 10000;
+
+      const txId = `tx-barcode-out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const noteDesc = item.isPartial
+        ? `Lấy một phần: ${item.partialQuantity} ${item.unit}${targetBottleCodeForTx ? ` từ chai ${targetBottleCodeForTx}` : ''}`
+        : `Xuất ${item.bottleCount} chai (${totalDeductedVol} ${chem.primaryUnit})`;
+
+      const tx: InventoryTransaction = {
+        id: txId,
+        timestamp: new Date().toISOString(),
+        date: todayStr,
+        type: 'USAGE',
+        chemicalId: chem.id,
+        chemicalName: chem.name,
+        bottleId: targetBottleIdForTx,
+        bottleCode: targetBottleCodeForTx,
+        quantity: totalDeductedVol,
+        unit: chem.primaryUnit,
+        previousStock: prevTotal,
+        newStock: newTotal,
+        user: currentUser.name,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        source: 'MANUAL',
+        project: item.project || 'Chiết xuất & Nghiên cứu',
+        purpose: item.purpose || 'Quét mã xuất kho sử dụng',
+        notes: `${noteDesc}${item.recipient ? ` (Người nhận: ${item.recipient})` : ''}${item.notes ? ` - ${item.notes}` : ''}`,
+      };
+
+      newTransactions.push(tx);
+
+      logAudit(
+        'STOCK OUT (BARCODE BATCH)',
+        'CHEMICAL',
+        chem.id,
+        `${currentUser.name} quét mã xuất kho: ${noteDesc} (${chem.name}). Tồn kho còn lại: ${newTotal} ${chem.primaryUnit}.`
+      );
+
+      if (isSupabaseConfigured()) {
+        supabase.from('stock_transactions').insert({
+          chemical_id: chem.id,
+          chemical_name: chem.name,
+          bottle_id: targetBottleIdForTx,
+          bottle_code: targetBottleCodeForTx,
+          user_id: currentUser.id,
+          user_name: currentUser.name,
+          transaction_type: 'EXPORT',
+          quantity: totalDeductedVol,
+          unit: chem.primaryUnit,
+          quantity_before: prevTotal,
+          quantity_after: newTotal,
+          reference_id: txId,
+          notes: noteDesc,
+        }).then(() => {});
+      }
+    }
+
+    setBottles(updatedBottlesList);
+    setTransactions(prev => [...newTransactions, ...prev]);
+
+    return {
+      success: true,
+      message: `Đã xuất kho thành công cho ${items.length} loại hóa chất. Tồn kho đã được trừ chính xác.`,
+      totalBottlesExported: grandTotalExported,
+    };
+  };
+
+  // =========================================================================
   // REVERSAL / VOID TRANSACTION (Section 53 & Section 65 Test Q)
   // =========================================================================
   const reverseTransaction = (transactionId: string, reason: string) => {
@@ -3033,6 +3563,36 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       success: true,
       message: `Đã điều chỉnh tồn kho chai ${targetBottle.bottleCode}: ${prevVol} → ${newVol} ${targetBottle.unit}.`,
     };
+  };
+
+  // =========================================================================
+  // ARCHIVED PERIODIC REPORTS (Báo cáo định kỳ & Xuất PDF)
+  // =========================================================================
+  const saveArchivedReport = (reportData: Omit<ArchivedPeriodicReport, 'id' | 'createdAt'>) => {
+    const newId = `rep-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newReport: ArchivedPeriodicReport = {
+      ...reportData,
+      id: newId,
+      createdAt: new Date().toISOString(),
+    };
+    setArchivedReports((prev) => [newReport, ...prev]);
+    logAudit(
+      'LƯU TRỮ BÁO CÁO ĐỊNH KỲ',
+      'REPORT',
+      newId,
+      `${currentUser.name} lưu trữ báo cáo: "${newReport.title}" (${newReport.code}) - ${newReport.period}`
+    );
+    return {
+      success: true,
+      message: `Đã lưu trữ báo cáo "${newReport.title}" thành công vào hồ sơ định kỳ.`,
+      reportId: newId,
+    };
+  };
+
+  const deleteArchivedReport = (id: string) => {
+    setArchivedReports((prev) => prev.filter((r) => r.id !== id));
+    logAudit('XÓA BÁO CÁO LƯU TRỮ', 'REPORT', id, `${currentUser.name} xóa báo cáo lưu trữ ID: ${id}`);
+    return { success: true, message: 'Đã xóa báo cáo khỏi kho lưu trữ định kỳ.' };
   };
 
   // =========================================================================
@@ -4191,12 +4751,18 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
 
         recordUsage,
         stockIn,
+        batchStockInByBarcode,
+        batchStockOutByBarcode,
         reverseTransaction,
 
         discrepancyReports,
         reportDiscrepancy,
         resolveDiscrepancy,
         createStockAdjustment,
+
+        archivedReports,
+        saveArchivedReport,
+        deleteArchivedReport,
 
         notifications,
         markNotificationAsRead,

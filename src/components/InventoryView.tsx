@@ -23,6 +23,8 @@ import {
   Printer,
   Sparkles,
   CheckCircle2,
+  Barcode,
+  FileText,
 } from 'lucide-react';
 import { ChemicalDetailModal } from './modals/ChemicalDetailModal';
 import { EditChemicalModal } from './modals/EditChemicalModal';
@@ -38,6 +40,8 @@ interface Props {
   onOpenQrScanner?: () => void;
   onOpenArchiveCenter?: () => void;
   onOpenDeleteChemical?: (chemical: Chemical) => void;
+  onOpenSupermarketBarcode?: (mode?: 'STOCK_IN' | 'STOCK_OUT') => void;
+  onOpenPdfReport?: (type?: 'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE') => void;
   externalSearchTerm?: string;
   targetChemicalId?: string;
   initialFilterStatus?: string;
@@ -53,6 +57,8 @@ export const InventoryView: React.FC<Props> = ({
   onOpenQrScanner,
   onOpenArchiveCenter,
   onOpenDeleteChemical,
+  onOpenSupermarketBarcode,
+  onOpenPdfReport,
   externalSearchTerm,
   targetChemicalId,
   initialFilterStatus,
@@ -260,6 +266,28 @@ export const InventoryView: React.FC<Props> = ({
             <span>+ Ghi Sử Dụng</span>
           </button>
 
+          {onOpenSupermarketBarcode && (
+            <>
+              <button
+                onClick={() => onOpenSupermarketBarcode('STOCK_IN')}
+                className="flex px-3.5 py-1.5 text-xs font-bold text-white bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-xl transition-all items-center gap-1.5 shadow-xs hover:shadow-emerald-500/20 cursor-pointer active:scale-95"
+                title="Quét mã nhập kho: Quét lặp mã vạch / QR tự động cộng thêm chai vào kho"
+              >
+                <Barcode className="w-3.5 h-3.5 text-emerald-200" />
+                <span>Quét mã nhập kho</span>
+              </button>
+
+              <button
+                onClick={() => onOpenSupermarketBarcode('STOCK_OUT')}
+                className="flex px-3.5 py-1.5 text-xs font-bold text-cyan-800 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-xl transition-all items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                title="Quét mã sử dụng hóa chất: Quét mã vạch / QR chai để xuất kho và trừ tồn"
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-cyan-600" />
+                <span>Quét mã sử dụng hóa chất</span>
+              </button>
+            </>
+          )}
+
           {/* Section 43 & 44 & 66: Add Chemical & Excel Import are Manager only */}
           {isManager && (
             <>
@@ -279,6 +307,17 @@ export const InventoryView: React.FC<Props> = ({
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
                   <span>📥 Nhập Excel / Sheets</span>
+                </button>
+              )}
+
+              {onOpenPdfReport && (
+                <button
+                  onClick={() => onOpenPdfReport('INVENTORY')}
+                  className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  title="Xuất danh sách hóa chất hiện tại ra file PDF (hỗ trợ in ấn và lưu trữ báo cáo định kỳ)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-cyan-700" />
+                  <span>📄 Xuất Báo Cáo PDF</span>
                 </button>
               )}
 

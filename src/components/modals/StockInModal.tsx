@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useLab } from '../../context/LabContext';
 import { ChemicalUnit } from '../../types';
 import { COMMON_UNITS } from '../../utils/units';
-import { X, Check, AlertCircle, ShieldAlert, Layers, Settings2, PlusCircle, Building2, DoorClosed } from 'lucide-react';
+import { X, Check, AlertCircle, ShieldAlert, Layers, Settings2, PlusCircle, Building2, DoorClosed, Barcode } from 'lucide-react';
 import { CabinetManagementModal } from './CabinetManagementModal';
+import { SupermarketBarcodeModal } from './SupermarketBarcodeModal';
 
 interface Props {
   isOpen: boolean;
@@ -18,6 +19,17 @@ export const StockInModal: React.FC<Props> = ({
   preselectedChemicalId,
   preselectedBottleCode,
 }) => {
+  const [entryTab, setEntryTab] = useState<'SUPERMARKET' | 'MANUAL'>(
+    preselectedChemicalId ? 'MANUAL' : 'SUPERMARKET'
+  );
+
+  useEffect(() => {
+    if (isOpen) {
+      if (preselectedChemicalId) {
+        setEntryTab('MANUAL');
+      }
+    }
+  }, [isOpen, preselectedChemicalId]);
   const {
     chemicals,
     stockIn,
@@ -123,6 +135,18 @@ export const StockInModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
+  if (entryTab === 'SUPERMARKET') {
+    return (
+      <SupermarketBarcodeModal
+        isOpen={isOpen}
+        onClose={onClose}
+        initialMode="STOCK_IN"
+        onSwitchToManual={() => setEntryTab('MANUAL')}
+        onCompleted={onClose}
+      />
+    );
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -187,6 +211,25 @@ export const StockInModal: React.FC<Props> = ({
             className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors"
           >
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tab switch bar: Quét Lặp Siêu Thị vs Nhập Thủ Công */}
+        <div className="flex border-b border-slate-200 bg-slate-100/70 p-1 gap-1 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setEntryTab('SUPERMARKET')}
+            className="flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 cursor-pointer"
+          >
+            <Barcode className="w-3.5 h-3.5 text-emerald-600" />
+            <span>⚡ Quét Lặp Mã Vạch Siêu Thị (Nhập nhiều chai)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEntryTab('MANUAL')}
+            className="flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all bg-white text-slate-900 shadow-2xs font-bold cursor-pointer"
+          >
+            <span>📝 Nhập Thủ Công 1 Chai</span>
           </button>
         </div>
 

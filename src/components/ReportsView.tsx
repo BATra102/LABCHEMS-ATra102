@@ -39,7 +39,11 @@ import {
 } from 'lucide-react';
 import { convertUnit } from '../utils/units';
 
-export const ReportsView: React.FC = () => {
+interface Props {
+  onOpenPdfReport?: (type?: 'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE') => void;
+}
+
+export const ReportsView: React.FC<Props> = ({ onOpenPdfReport }) => {
   const {
     transactions,
     chemicals,
@@ -1575,7 +1579,49 @@ export const ReportsView: React.FC = () => {
       {/* TAB 7: TRUNG TÂM XUẤT BÁO CÁO TOÀN DIỆN (OFFICIAL EXPORT SUITE)        */}
       {/* ===================================================================== */}
       {activeReportTab === 'exports' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-4">
+          {onOpenPdfReport && (
+            <div className="p-4 bg-linear-to-r from-cyan-900 to-teal-900 text-white rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/10 rounded-xl">
+                  <FileText className="w-6 h-6 text-cyan-200" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Xuất Báo Cáo PDF & In Hồ Sơ Chuẩn Văn Bản A4</h3>
+                  <p className="text-xs text-cyan-200">
+                    Hỗ trợ in ấn hoặc lưu PDF cho danh mục tồn kho, lịch sử giao dịch và lưu trữ định kỳ
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenPdfReport('INVENTORY')}
+                  className="px-3.5 py-2 bg-white hover:bg-cyan-50 text-cyan-900 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>PDF Tồn Kho</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenPdfReport('TRANSACTIONS')}
+                  className="px-3.5 py-2 bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>PDF Giao Dịch</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenPdfReport('ARCHIVE')}
+                  className="px-3.5 py-2 bg-cyan-800 hover:bg-cyan-700 text-white font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Kho Lưu Trữ</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Export 1: Inventory */}
           <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-3">
             <div className="flex items-center gap-2">
@@ -1587,21 +1633,34 @@ export const ReportsView: React.FC = () => {
                 <p className="text-[11px] text-slate-500">Danh mục đầy đủ, số CAS, nồng độ, tồn kho và vị trí lưu trữ</p>
               </div>
             </div>
-            <button
-              onClick={() => {
-                exportChemicalInventoryCSV(
-                  chemicals,
-                  getChemicalTotalStock,
-                  getChemicalStockStatus,
-                  getChemicalExpiryStatus
-                );
-                showExportSuccess('Đã xuất file Chemical Inventory CSV thành công!');
-              }}
-              className="w-full py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>Tải file Inventory CSV (Excel)</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  exportChemicalInventoryCSV(
+                    chemicals,
+                    getChemicalTotalStock,
+                    getChemicalStockStatus,
+                    getChemicalExpiryStatus
+                  );
+                  showExportSuccess('Đã xuất file Chemical Inventory CSV thành công!');
+                }}
+                className="w-full py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Tải file Excel (CSV)</span>
+              </button>
+
+              {onOpenPdfReport && (
+                <button
+                  type="button"
+                  onClick={() => onOpenPdfReport('INVENTORY')}
+                  className="w-full py-2.5 text-xs font-bold text-slate-800 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-cyan-700" />
+                  <span>In / Lưu PDF</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Export 2: Stock Movement (Nhập - Xuất - Tồn) */}
@@ -1758,6 +1817,7 @@ export const ReportsView: React.FC = () => {
               <span>Tải file Báo cáo Hạn dùng (CSV)</span>
             </button>
           </div>
+        </div>
         </div>
       )}
 

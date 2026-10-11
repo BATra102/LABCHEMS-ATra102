@@ -26,6 +26,8 @@ import {
   LogOut,
   Menu as MenuIcon,
   Database,
+  Barcode,
+  FileText,
 } from 'lucide-react';
 import { getStockStatusLabel } from '../utils/status';
 
@@ -56,6 +58,8 @@ interface Props {
   onOpenUserGuide?: () => void;
   onOpenSupabaseConfig?: () => void;
   onSignOutToLogin?: () => void;
+  onOpenSupermarketBarcode?: (mode?: 'STOCK_IN' | 'STOCK_OUT') => void;
+  onOpenPdfReport?: (type?: 'INVENTORY' | 'TRANSACTIONS' | 'ARCHIVE') => void;
 }
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -96,6 +100,8 @@ export const Header: React.FC<Props> = ({
   onOpenSupabaseConfig,
   onSignOutToLogin,
   onSignOut,
+  onOpenSupermarketBarcode,
+  onOpenPdfReport,
 }) => {
   const {
     chemicals,
@@ -466,6 +472,45 @@ export const Header: React.FC<Props> = ({
 
           {/* Zone 4: Action Buttons, Notification Center, User Profile */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Chức năng 1: Quét mã nhập kho */}
+            {onOpenSupermarketBarcode && (
+              <button
+                type="button"
+                onClick={() => onOpenSupermarketBarcode('STOCK_IN')}
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                title="Quét mã nhập kho: Quét lặp mã vạch / QR tự động cộng tồn kho"
+              >
+                <Barcode className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Quét nhập kho</span>
+              </button>
+            )}
+
+            {/* Chức năng 2: Quét mã sử dụng hóa chất */}
+            {onOpenSupermarketBarcode && (
+              <button
+                type="button"
+                onClick={() => onOpenSupermarketBarcode('STOCK_OUT')}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                title="Quét mã sử dụng hóa chất: Quét mã vạch / QR chai để xuất kho và trừ tồn"
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-cyan-700" />
+                <span>Quét sử dụng hóa chất</span>
+              </button>
+            )}
+
+            {/* Chức năng 3: Xuất Báo Cáo PDF & In Ấn */}
+            {onOpenPdfReport && (
+              <button
+                type="button"
+                onClick={() => onOpenPdfReport('INVENTORY')}
+                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                title="Xuất danh sách hóa chất, lịch sử giao dịch ra PDF hoặc lưu trữ định kỳ"
+              >
+                <FileText className="w-3.5 h-3.5 text-cyan-700" />
+                <span>Xuất PDF</span>
+              </button>
+            )}
+
             {/* Cloud Database Status Badge (Section 9 & 11) */}
             {isManager && onOpenSupabaseConfig ? (
               <button
@@ -734,6 +779,27 @@ export const Header: React.FC<Props> = ({
                         </div>
                         <span className="text-[10px] bg-cyan-100 text-cyan-900 px-1.5 py-0.5 rounded font-bold font-mono">
                           Trợ giúp
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Xuất Báo Cáo PDF & In Hồ Sơ */}
+                  {onOpenPdfReport && (
+                    <div className="p-2 border-b border-slate-100">
+                      <button
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          onOpenPdfReport('INVENTORY');
+                        }}
+                        className="w-full py-1.5 px-3 hover:bg-slate-100 text-slate-800 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-cyan-700" />
+                          <span>Xuất Báo Cáo PDF & In Ấn</span>
+                        </div>
+                        <span className="text-[10px] bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded font-bold font-mono">
+                          A4 / PDF
                         </span>
                       </button>
                     </div>
