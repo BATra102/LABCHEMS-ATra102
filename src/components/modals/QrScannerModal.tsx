@@ -812,17 +812,17 @@ export const QrScannerModal: React.FC<Props> = ({
         <div className="px-5 py-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/90 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl shadow-xs">
-              <QrCode className="w-5 h-5" />
+              <Barcode className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Cổng Thao Tác Nhanh Bằng QR</span>
+                <span>Quét Mã Vạch / QR Trên Chai</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  AUTO SCANNER
+                  BARCODE & QR
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400">
-                Tự động nhận diện QR & Barcode 1D → Tra cứu và mở chai hóa chất tức thì
+                Tự động nhận diện mã vạch chai (Barcode 1D / Code 128) & mã QR → Tra cứu và thao tác chai tức thì
               </p>
             </div>
           </div>

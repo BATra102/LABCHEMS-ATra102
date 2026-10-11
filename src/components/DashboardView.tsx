@@ -31,6 +31,7 @@ import {
   AlertCircle,
   Truck,
   RotateCcw,
+  Barcode,
 } from 'lucide-react';
 import { DashboardStatsDetailModal, DashboardModalType } from './modals/DashboardStatsDetailModal';
 
@@ -147,11 +148,11 @@ export const DashboardView: React.FC<Props> = ({
 
   return (
     <div className="space-y-3 sm:space-y-3.5 max-w-7xl mx-auto">
-      {/* 1. COMPACT TOP HEADER & QUICK ACTION TOOLBAR */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+      {/* 1. COMPACT TOP HEADER & QUICK ACTION TOOLBAR (Tối ưu gọn gàng cho cả Điện thoại & Laptop) */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 sm:gap-2.5 pb-2.5 border-b border-slate-200">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            <h1 className="text-base sm:text-lg lg:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
               <span>{isManager ? 'Bảng Điều Khiển Quản Lý' : 'Tổng Quan Phòng Thí Nghiệm'}</span>
             </h1>
             <span
@@ -172,76 +173,88 @@ export const DashboardView: React.FC<Props> = ({
               </button>
             )}
           </div>
-          <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">
             Hệ thống LabChem · Người dùng: <strong className="text-slate-700">{currentUser.name}</strong> ({currentUser.email})
           </p>
         </div>
 
-        {/* Thanh công cụ thao tác nhanh gọn gàng */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 border border-slate-200/90 rounded-2xl flex-wrap shadow-2xs">
-          {onOpenQrScanner && (
+        {/* Thanh công cụ thao tác nhanh gọn gàng: Thân thiện một chạm trên điện thoại, trải ngang thanh thoát trên laptop */}
+        <div className="w-full lg:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-1 sm:gap-1.5 p-1 bg-slate-100/90 border border-slate-200/90 rounded-2xl shadow-2xs">
+          {/* Nhóm thao tác cốt lõi: Quét mã vạch trên chai & Ghi sử dụng */}
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-1">
+            {onOpenQrScanner && (
+              <button
+                type="button"
+                onClick={onOpenQrScanner}
+                className="px-2.5 py-1.5 sm:py-1 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs hover:shadow-cyan-500/20 active:scale-95 cursor-pointer ring-1 ring-cyan-400/40 shrink-0"
+                title="Quét mã vạch / QR tem dán chai hóa chất để tra cứu và xuất dùng"
+              >
+                <Barcode className="w-3.5 h-3.5 text-cyan-100 shrink-0" />
+                <span className="truncate">Quét mã vạch chai</span>
+              </button>
+            )}
+
             <button
-              onClick={onOpenQrScanner}
-              className="px-2.5 py-1 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-xl transition-all flex items-center gap-1 shadow-xs hover:shadow-cyan-500/20 active:scale-95 cursor-pointer ring-1 ring-cyan-400/40"
-              title="Quét mã QR tem dán chai"
+              type="button"
+              onClick={() => onOpenRecordUsage()}
+              className="px-2.5 py-1.5 sm:py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs hover:shadow-emerald-500/20 active:scale-95 cursor-pointer ring-1 ring-emerald-400/40 shrink-0"
+              title="Ghi nhận sử dụng và trừ tồn kho"
             >
-              <QrCode className="w-3.5 h-3.5 text-cyan-100" />
-              <span>Quét QR</span>
+              <Plus className="w-3.5 h-3.5 text-emerald-100 shrink-0" />
+              <span className="truncate">Ghi Sử Dụng</span>
             </button>
-          )}
+          </div>
 
-          <button
-            onClick={() => onOpenRecordUsage()}
-            className="px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all flex items-center gap-1 shadow-xs hover:shadow-emerald-500/20 active:scale-95 cursor-pointer ring-1 ring-emerald-400/40"
-            title="Ghi nhận sử dụng và trừ tồn kho"
-          >
-            <Plus className="w-3.5 h-3.5 text-emerald-100" />
-            <span>Ghi Sử Dụng</span>
-          </button>
+          <div className="hidden sm:block h-3.5 w-px bg-slate-300 mx-0.5 shrink-0" />
 
-          <div className="hidden sm:block h-3.5 w-px bg-slate-300 mx-0.5" />
+          {/* Nhóm thao tác phụ: Cuộn ngang mượt mà không vỡ dòng trên điện thoại, xếp thẳng tinh gọn trên laptop */}
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth py-0.5 sm:py-0">
+            {onOpenDiscrepancyModal && (
+              <button
+                type="button"
+                onClick={onOpenDiscrepancyModal}
+                className="px-2 py-1 text-[11px] sm:text-xs font-semibold text-amber-800 hover:text-amber-950 bg-white hover:bg-amber-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer shrink-0 border border-slate-200/60"
+                title="Báo cáo chênh lệch số lượng thực tế"
+              >
+                <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                <span className="whitespace-nowrap">Báo Lệch</span>
+              </button>
+            )}
 
-          {onOpenDiscrepancyModal && (
             <button
-              onClick={onOpenDiscrepancyModal}
-              className="px-2.5 py-1 text-xs font-semibold text-amber-700 hover:text-amber-900 bg-white hover:bg-amber-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
-              title="Báo cáo chênh lệch số lượng thực tế"
+              type="button"
+              onClick={() => onNavigateToTab('purchase')}
+              className="px-2 py-1 text-[11px] sm:text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer shrink-0 border border-slate-200/60"
+              title="Xem danh sách mua sắm hóa chất"
             >
-              <AlertTriangle className="w-3 h-3 text-amber-600" />
-              <span>Báo Lệch Tồn</span>
+              <ShoppingCart className="w-3 h-3 text-slate-500 shrink-0" />
+              <span className="whitespace-nowrap">Mua Sắm ({pendingPurchases.length})</span>
             </button>
-          )}
 
-          <button
-            onClick={() => onNavigateToTab('purchase')}
-            className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
-            title="Xem danh sách mua sắm hóa chất"
-          >
-            <ShoppingCart className="w-3 h-3 text-slate-500" />
-            <span>Mua Sắm ({pendingPurchases.length})</span>
-          </button>
+            {onOpenEmailAlerts && (
+              <button
+                type="button"
+                onClick={onOpenEmailAlerts}
+                className="px-2 py-1 text-[11px] sm:text-xs font-semibold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer shrink-0 border border-slate-200/60"
+                title="Hộp thư & Lịch sử email cảnh báo tự động"
+              >
+                <Mail className="w-3 h-3 text-rose-600 shrink-0" />
+                <span className="whitespace-nowrap">Email ({emailAlertLogs.length})</span>
+              </button>
+            )}
 
-          {onOpenEmailAlerts && (
-            <button
-              onClick={onOpenEmailAlerts}
-              className="px-2.5 py-1 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
-              title="Hộp thư & Lịch sử email cảnh báo tự động"
-            >
-              <Mail className="w-3 h-3 text-rose-600" />
-              <span>Email ({emailAlertLogs.length})</span>
-            </button>
-          )}
-
-          {onOpenUserGuide && (
-            <button
-              onClick={onOpenUserGuide}
-              className="px-2 py-1 text-xs font-semibold text-cyan-800 hover:text-cyan-900 bg-white hover:bg-cyan-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
-              title="Hướng dẫn sử dụng"
-            >
-              <BookOpen className="w-3 h-3 text-cyan-700" />
-              <span className="hidden sm:inline">Hướng Dẫn</span>
-            </button>
-          )}
+            {onOpenUserGuide && (
+              <button
+                type="button"
+                onClick={onOpenUserGuide}
+                className="px-2 py-1 text-[11px] sm:text-xs font-semibold text-cyan-800 hover:text-cyan-900 bg-white hover:bg-cyan-50 rounded-xl transition-colors flex items-center gap-1 shadow-2xs cursor-pointer shrink-0 border border-slate-200/60"
+                title="Hướng dẫn sử dụng"
+              >
+                <BookOpen className="w-3 h-3 text-cyan-700 shrink-0" />
+                <span className="whitespace-nowrap">Hướng Dẫn</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

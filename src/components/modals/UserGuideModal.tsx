@@ -253,9 +253,9 @@ export const UserGuideModal: React.FC<Props> = ({ isOpen, onClose, defaultTab = 
                       <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center font-bold text-xs">
                         BƯỚC 2
                       </div>
-                      <div className="font-bold text-slate-900 text-xs">Lấy Hóa Chất & Quét Mã</div>
+                      <div className="font-bold text-slate-900 text-xs">Lấy Hóa Chất & Quét Mã Vạch Chai</div>
                       <p className="text-[11px] text-slate-600 leading-relaxed">
-                        Khi làm thí nghiệm, mở tính năng <strong>Quét QR</strong> bằng camera hoặc tra cứu tên chai để kiểm tra hạn dùng, nồng độ và lượng tồn thực tế còn lại.
+                        Khi làm thí nghiệm, mở tính năng <strong>Quét Mã Vạch / QR Chai</strong> bằng camera hoặc tra cứu tên chai để kiểm tra hạn dùng, nồng độ và lượng tồn thực tế còn lại.
                       </p>
                     </div>
 
@@ -300,9 +300,9 @@ export const UserGuideModal: React.FC<Props> = ({ isOpen, onClose, defaultTab = 
                   <div className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                     <span className="w-6 h-6 rounded-full bg-cyan-700 text-white flex items-center justify-center text-xs font-bold shrink-0">1</span>
                     <div>
-                      <div className="text-xs font-bold text-slate-900">Mở tính năng Quét QR</div>
+                      <div className="text-xs font-bold text-slate-900">Mở tính năng Quét Mã Vạch / QR Chai</div>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Nhấp nút <strong>"Quét QR"</strong> trên thanh điều hướng đầu trang (Header) hoặc trong tab "Kho Hóa Chất".
+                        Nhấp nút <strong>"Quét mã vạch chai"</strong> trên thanh điều hướng đầu trang (Header) hoặc trong tab "Kho Hóa Chất".
                       </p>
                     </div>
                   </div>

@@ -148,10 +148,10 @@ export const UsageView: React.FC<Props> = ({
             <button
               onClick={onOpenQrScanner}
               className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 border border-slate-200"
-              title="Quét mã QR tem dán chai bằng Camera (Mục 4)"
+              title="Quét mã vạch / QR tem dán chai bằng Camera"
             >
-              <QrCode className="w-3.5 h-3.5 text-slate-600" />
-              <span>Quét QR Chai</span>
+              <Barcode className="w-3.5 h-3.5 text-slate-600" />
+              <span>Quét Mã Vạch Chai</span>
             </button>
           )}
           <button

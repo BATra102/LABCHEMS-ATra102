@@ -622,14 +622,14 @@ export const RecordUsageModal: React.FC<Props> = ({
                 setSelectionMode('QR');
                 setIsScanningActive(true);
               }}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 selectionMode === 'QR'
                   ? 'bg-cyan-700 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Camera className="w-3.5 h-3.5" />
-              <span>📷 Quét QR chai</span>
+              <Barcode className="w-3.5 h-3.5" />
+              <span>Quét mã vạch trên chai</span>
             </button>
 
             <button

@@ -184,8 +184,8 @@ export const MobileMenuDrawer: React.FC<Props> = ({
             }}
             className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 transition-all shadow-sm"
           >
-            <QrCode className="w-4 h-4" />
-            <span>📷 Quét QR dùng chai</span>
+            <Barcode className="w-4 h-4" />
+            <span>📷 Quét mã vạch trên chai</span>
           </button>
 
           <button

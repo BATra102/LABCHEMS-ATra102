@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useLab } from '../context/LabContext';
 import {
   QrCode,
+  Barcode,
   Search,
   FlaskConical,
   Clock,
@@ -168,7 +169,7 @@ export const UserDashboardView: React.FC<Props> = ({
           <div>
             <div className="flex items-start justify-between">
               <div className="p-3.5 bg-white/20 rounded-2xl backdrop-blur-md border border-white/30 text-white shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-all duration-300">
-                <QrCode className="w-7 h-7" />
+                <Barcode className="w-7 h-7" />
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/20 text-white border border-white/30 backdrop-blur-xs">
                 KHUYÊN DÙNG
@@ -177,16 +178,16 @@ export const UserDashboardView: React.FC<Props> = ({
 
             <div className="mt-5 space-y-1.5">
               <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-1.5">
-                <span>📷 Quét QR dùng hóa chất</span>
+                <span>📷 Quét mã vạch trên chai</span>
               </h2>
               <p className="text-xs text-cyan-100 leading-relaxed font-normal">
-                Quét tem QR dán trên chai để nhận diện tức thì và trừ tồn kho tự động.
+                Quét tem mã vạch / QR dán trên chai để nhận diện tức thì và trừ tồn kho tự động.
               </p>
             </div>
           </div>
 
           <div className="mt-6 pt-3 border-t border-white/20 flex items-center justify-between text-xs font-bold text-cyan-100">
-            <span>Mở Camera quét ngay</span>
+            <span>Mở Camera quét mã chai</span>
             <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-1.5 transition-transform" />
           </div>
         </button>

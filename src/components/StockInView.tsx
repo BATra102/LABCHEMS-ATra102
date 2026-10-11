@@ -36,10 +36,10 @@ export const StockInView: React.FC<Props> = ({
             <button
               onClick={onOpenQrScanner}
               className="px-3.5 py-2 text-xs font-bold text-white bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 rounded-lg transition-all flex items-center gap-1.5 shadow-sm hover:shadow-cyan-500/20 cursor-pointer active:scale-95"
-              title="Quét mã QR tem dán chai bằng Camera (Mục 4)"
+              title="Quét mã vạch / QR tem dán chai bằng Camera"
             >
-              <QrCode className="w-3.5 h-3.5 text-cyan-200" />
-              <span>Quét QR Chai</span>
+              <Barcode className="w-3.5 h-3.5 text-cyan-200" />
+              <span>Quét Mã Vạch Chai</span>
             </button>
           )}
           {isManager && onOpenExcelImport && (
