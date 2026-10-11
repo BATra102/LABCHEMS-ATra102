@@ -429,12 +429,12 @@ async function startServer() {
   /**
    * POST /api/admin-create-user & /api/create-user
    * Endpoint cấp tài khoản mới an toàn bởi Người quản lý (Server-side Admin API)
-   * Không yêu cầu Email từ người dùng - sử dụng Username duy nhất
+   * Xác minh Bearer token của Quản lý, tạo Auth user và ghi vào public.profiles
    */
   app.post(['/api/admin-create-user', '/api/create-user'], async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
-      const { username, name, full_name, email, password, role, department, status } = req.body;
+      const { username, name, full_name, email, password, role, department, status } = req.body || {};
 
       const trimmedUsername = String(username || email || '').trim().toLowerCase();
       const trimmedName = String(name || full_name || '').trim();
@@ -453,7 +453,13 @@ async function startServer() {
         });
       }
 
-      // Kiểm tra xem username đã tồn tại chưa (Unique username)
+      if (!password || String(password).length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'Mật khẩu phải có độ dài tối thiểu 6 ký tự.',
+        });
+      }
+
       const usernameClean = trimmedUsername.replace(/@labchem\.(internal|local|vn|com)$/, '').toLowerCase();
       const usernameRegex = /^[a-zA-Z0-9_.]+$/;
       if (!usernameRegex.test(usernameClean)) {
@@ -463,25 +469,13 @@ async function startServer() {
         });
       }
 
-      let existingInStore = serverKnownUsernames.has(usernameClean);
-      if (!existingInStore) {
-        for (const item of serverProfilesStore.values()) {
-          if (item.username && item.username.toLowerCase() === usernameClean) {
-            existingInStore = true;
-            break;
-          }
-        }
-      }
-      if (existingInStore) {
-        return res.status(400).json({
-          success: false,
-          message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
-        });
-      }
+      const allowedRoles = ['SENIOR_MANAGER', 'MANAGER', 'STAFF', 'VIEWER', 'USER', 'ADMIN', 'LAB_MANAGER', 'MEMBER'];
+      const requestedRole = allowedRoles.includes(role) ? role : 'STAFF';
 
-      const requestedRole = role || 'STAFF';
-      const requestedStatus = status || 'ACTIVE';
-      const requestedDept = department || 'Bộ môn Dược liệu & Chiết xuất';
+      const allowedStatuses = ['ACTIVE', 'LOCKED', 'PENDING', 'SUSPENDED', 'DEACTIVATED', 'DELETED', 'INACTIVE'];
+      const requestedStatus = allowedStatuses.includes(status) ? status : 'ACTIVE';
+
+      const requestedDept = department ? String(department).trim() : 'Bộ môn Dược liệu & Chiết xuất';
       const internalEmail = email && email.includes('@') && !email.endsWith('@labchem.local') && !email.endsWith('@labchem.internal')
         ? email.trim().toLowerCase()
         : `${usernameClean}@labchem.vn`;
@@ -495,155 +489,189 @@ async function startServer() {
         process.env.VITE_SUPABASE_ANON_KEY ||
         process.env.SUPABASE_ANON_KEY ||
         'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const supabaseServiceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SECRET_KEY ||
+        '';
 
-      const clientWithToken = createClient(supabaseUrl, supabaseAnonKey);
+      // 1. Xác thực Caller qua Bearer token (Requirement 4)
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+          success: false,
+          message: 'Yêu cầu phiên làm việc của Người quản lý (thiếu Authorization Bearer token).',
+        });
+      }
+
+      const token = authHeader.split(' ')[1];
+      const clientWithToken = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
       let callerEmail = '';
       let callerId = '';
 
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split(' ')[1];
-        try {
-          const {
-            data: { user: callerAuthUser },
-          } = await clientWithToken.auth.getUser(token);
+      try {
+        const {
+          data: { user: callerAuthUser },
+          error: tokenErr,
+        } = await clientWithToken.auth.getUser(token);
 
-          if (callerAuthUser) {
-            callerId = callerAuthUser.id;
-            callerEmail = callerAuthUser.email || '';
-          }
-        } catch (_) {}
+        if (tokenErr || !callerAuthUser) {
+          return res.status(401).json({
+            success: false,
+            message: 'Phiên làm việc của Người quản lý đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.',
+          });
+        }
+        callerId = callerAuthUser.id;
+        callerEmail = (callerAuthUser.email || '').toLowerCase();
+      } catch (tokenEx: any) {
+        return res.status(401).json({
+          success: false,
+          message: `Lỗi xác thực phiên Người quản lý: ${tokenEx?.message || 'Không xác định'}`,
+        });
       }
 
-      if (!callerEmail && req.body.callerEmail) {
-        callerEmail = String(req.body.callerEmail).trim().toLowerCase();
-      }
-      if (!callerId && req.body.callerId) {
-        callerId = String(req.body.callerId).trim();
+      // 2. Kiểm tra cấu hình máy chủ SUPABASE_SERVICE_ROLE_KEY (Requirement 3)
+      if (!supabaseServiceKey) {
+        return res.status(500).json({
+          success: false,
+          message:
+            'Lỗi cấu hình máy chủ: Chưa cấu hình biến môi trường SUPABASE_SERVICE_ROLE_KEY trên Vercel. Vui lòng thêm biến SUPABASE_SERVICE_ROLE_KEY trong Vercel Environment Variables để kích hoạt quản trị viên.',
+        });
       }
 
-      const dbClient = supabaseServiceKey
-        ? createClient(supabaseUrl, supabaseServiceKey, {
-            auth: { autoRefreshToken: false, persistSession: false },
-          })
-        : clientWithToken;
+      const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
 
+      // Lấy profile thực tế của Caller
       let callerRole = '';
-      if (callerId) {
-        try {
-          const { data: prof } = await dbClient
-            .from('profiles')
-            .select('role, email')
-            .eq('id', callerId)
-            .maybeSingle();
-          if (prof) callerRole = prof.role;
-        } catch (_) {}
-      }
+      let callerStatus = 'ACTIVE';
+
+      try {
+        const { data: prof } = await adminClient
+          .from('profiles')
+          .select('role, status, email, google_email')
+          .eq('id', callerId)
+          .maybeSingle();
+        if (prof) {
+          callerRole = prof.role || '';
+          callerStatus = prof.status || 'ACTIVE';
+          if (!callerEmail) callerEmail = (prof.email || prof.google_email || '').toLowerCase();
+        }
+      } catch (_) {}
 
       const isCallerSenior =
+        callerRole === 'SENIOR_MANAGER' ||
         callerEmail === 'buiantra2021@gmail.com' ||
-        callerEmail === 'buianhtra2021@gmail.com' ||
-        callerRole === 'SENIOR_MANAGER';
+        callerEmail === 'buianhtra2021@gmail.com';
 
       const isCallerManager =
         isCallerSenior ||
         callerRole === 'MANAGER' ||
         callerRole === 'ADMIN' ||
         callerRole === 'LAB_MANAGER' ||
-        callerEmail === 'jasminebee279@gmail.com' ||
-        req.body?.callerEmail === 'jasminebee279@gmail.com' ||
-        req.body?.callerEmail === 'buiantra2021@gmail.com';
+        callerEmail === 'jasminebee279@gmail.com';
 
-      if (!isCallerManager) {
+      if (!isCallerManager || callerStatus !== 'ACTIVE') {
         return res.status(403).json({
           success: false,
-          message: '403 Forbidden: Chỉ Quản lý (MANAGER) mới có quyền cấp tài khoản mới!',
+          message: '403 Forbidden: Chỉ Quản lý (MANAGER / SENIOR_MANAGER) ở trạng thái hoạt động mới có quyền cấp tài khoản!',
         });
       }
 
+      // Chống tự nâng quyền
+      if (
+        (requestedRole === 'SENIOR_MANAGER' || requestedRole === 'MANAGER' || requestedRole === 'ADMIN') &&
+        !isCallerSenior
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: '403 Forbidden: Chỉ Người quản lý cao cấp mới có quyền cấp vai trò Quản lý (MANAGER / ADMIN)!',
+        });
+      }
+
+      // 3. Kiểm tra trùng lặp trong database
       try {
-        const { data: existingUser } = await dbClient
+        const { data: existingUser } = await adminClient
           .from('profiles')
-          .select('id, username')
-          .ilike('username', usernameClean)
+          .select('id, username, member_code, email')
+          .or(`email.ilike.${internalEmail},member_code.ilike.${usernameClean}`)
           .maybeSingle();
 
         if (existingUser) {
           serverKnownUsernames.add(usernameClean);
           return res.status(400).json({
             success: false,
-            message: `Tên đăng nhập "${usernameClean}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
+            message: `Tên đăng nhập "${usernameClean}" hoặc email "${internalEmail}" đã tồn tại trên hệ thống.`,
           });
         }
       } catch (_) {}
 
+      // 4. Tạo hoặc đồng bộ Auth User trên Supabase Auth (Requirement 5)
       let newUserId: string | null = null;
+      let isExistingAuth = false;
 
-      // 1. Tạo Auth User bằng Supabase Auth Admin API nếu có service_role key
-      if (supabaseServiceKey && password) {
-        try {
-          const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
-            auth: { autoRefreshToken: false, persistSession: false },
-          });
+      const { data: adminCreated, error: adminErr } = await adminClient.auth.admin.createUser({
+        email: internalEmail,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          username: usernameClean,
+          member_code: usernameClean,
+          full_name: trimmedName,
+          role: requestedRole,
+          department: requestedDept,
+        },
+      });
 
-          const { data: adminCreated, error: adminErr } = await adminClient.auth.admin.createUser({
-            email: internalEmail,
+      if (adminCreated?.user?.id) {
+        newUserId = adminCreated.user.id;
+      } else if (
+        adminErr &&
+        (adminErr.message?.includes('already registered') || adminErr.message?.includes('email_exists'))
+      ) {
+        isExistingAuth = true;
+        const { data: listData } = await adminClient.auth.admin.listUsers();
+        const existing = listData?.users?.find((u) => u.email?.toLowerCase() === internalEmail.toLowerCase());
+        if (existing) {
+          newUserId = existing.id;
+          await adminClient.auth.admin.updateUserById(existing.id, {
             password,
             email_confirm: true,
             user_metadata: {
               username: usernameClean,
+              member_code: usernameClean,
               full_name: trimmedName,
               role: requestedRole,
               department: requestedDept,
             },
           });
-
-          if (!adminErr && adminCreated?.user?.id) {
-            newUserId = adminCreated.user.id;
-          } else if (adminErr && adminErr.message?.includes('already registered')) {
-            const { data: listData } = await adminClient.auth.admin.listUsers();
-            const existing = listData?.users?.find((u) => u.email?.toLowerCase() === internalEmail);
-            if (existing) {
-              newUserId = existing.id;
-              await adminClient.auth.admin.updateUserById(existing.id, { password });
-            }
-          }
-        } catch (adminEx) {
-          console.warn('Server admin.createUser notice:', adminEx);
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: `Lỗi Supabase Auth: ${adminErr.message}`,
+          });
         }
+      } else if (adminErr) {
+        return res.status(400).json({
+          success: false,
+          message: `Lỗi khi tạo người dùng trên Supabase Auth: ${adminErr.message}`,
+        });
       }
 
-      // 2. Nếu chưa có ID qua admin API, thử đăng ký bằng client độc lập
-      if (!newUserId && password) {
-        try {
-          const isolatedClient = createClient(supabaseUrl, supabaseAnonKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          const { data: signUpData } = await isolatedClient.auth.signUp({
-            email: internalEmail,
-            password,
-            options: {
-              data: {
-                username: usernameClean,
-                full_name: trimmedName,
-                role: requestedRole,
-                department: requestedDept,
-              },
-            },
-          });
-          if (signUpData?.user?.id) {
-            newUserId = signUpData.user.id;
-          }
-        } catch (_) {}
+      if (!newUserId) {
+        return res.status(500).json({
+          success: false,
+          message: 'Không thể xác định mã định danh người dùng từ Supabase Authentication.',
+        });
       }
 
-      const generatedId = newUserId || crypto.randomUUID();
-
-      // 3. Tạo hoặc cập nhật profile trong public.profiles bằng dbClient
-      const profilePayload = {
-        id: generatedId,
+      // 5. Lưu hồ sơ vào bảng public.profiles trên Supabase (Requirement 5, 6, 7)
+      const profilePayload: Record<string, any> = {
+        id: newUserId,
         member_code: usernameClean,
-        username: usernameClean,
         email: internalEmail,
         google_email: internalEmail,
         full_name: trimmedName,
@@ -656,45 +684,61 @@ async function startServer() {
       };
 
       try {
-        const { error: upsertErr } = await dbClient.from('profiles').upsert(profilePayload, { onConflict: 'id' });
-        if (upsertErr && (upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
-          const { username: _u, ...payloadWithoutUsername } = profilePayload;
-          await dbClient.from('profiles').upsert(payloadWithoutUsername, { onConflict: 'id' });
+        let { error: upsertErr } = await adminClient
+          .from('profiles')
+          .upsert({ ...profilePayload, username: usernameClean }, { onConflict: 'id' });
+
+        if (upsertErr && (upsertErr.code === '42703' || upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
+          const retryRes = await adminClient
+            .from('profiles')
+            .upsert(profilePayload, { onConflict: 'id' });
+          upsertErr = retryRes.error;
         }
-      } catch (upsertErr) {
-        console.warn('Upsert profile notice:', upsertErr);
+
+        if (upsertErr) {
+          console.error('Error saving profile to profiles table:', upsertErr);
+          return res.status(500).json({
+            success: false,
+            message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${upsertErr.message}`,
+          });
+        }
+      } catch (upsertEx: any) {
+        return res.status(500).json({
+          success: false,
+          message: `Lỗi ngoại lệ khi lưu hồ sơ vào profiles: ${upsertEx?.message || 'Không xác định'}`,
+        });
       }
 
-      // Lưu trữ trong serverProfilesStore
-      serverProfilesStore.set(generatedId, profilePayload);
+      // Lưu trữ trong serverProfilesStore cache
+      serverProfilesStore.set(newUserId, { ...profilePayload, username: usernameClean });
       serverKnownUsernames.add(usernameClean);
 
-      // Nếu vai trò là MANAGER, thêm vào system_roles_whitelist
+      // Nếu vai trò là MANAGER, đồng bộ vào system_roles_whitelist
       if (requestedRole === 'MANAGER') {
         try {
-          await dbClient.from('system_roles_whitelist').upsert(
+          await adminClient.from('system_roles_whitelist').upsert(
             {
               email: internalEmail,
               role: 'MANAGER',
-              notes: `Cấp bởi Quản lý lúc ${new Date().toLocaleString('vi-VN')} cho user ${usernameClean}`,
+              notes: `Cấp bởi Quản lý (${callerEmail}) lúc ${new Date().toLocaleString('vi-VN')} cho user ${usernameClean}`,
             },
             { onConflict: 'email' }
           );
         } catch (_) {}
       }
 
-      // 4. Ghi nhật ký kiểm toán ACCOUNT_CREATED (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
+      // 6. Ghi nhật ký kiểm toán ACCOUNT_CREATED (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
       try {
-        await dbClient.from('audit_logs').insert({
+        await adminClient.from('audit_logs').insert({
           action: 'ACCOUNT_CREATED',
           entity_type: 'USER',
-          entity_id: generatedId,
-          actor_name: callerEmail || 'Người quản lý',
-          actor_user_id: callerId || null,
-          user_id: callerId || null,
+          entity_id: newUserId,
+          actor_name: callerEmail,
+          actor_user_id: callerId,
+          user_id: callerId,
           description: `Đã cấp tài khoản mới: Tên đăng nhập "${usernameClean}" (${trimmedName}) [Vai trò: ${requestedRole}, Trạng thái: ${requestedStatus}, Bộ môn: ${requestedDept}]`,
           new_data: {
-            id: generatedId,
+            id: newUserId,
             username: usernameClean,
             full_name: trimmedName,
             role: requestedRole,
@@ -706,20 +750,23 @@ async function startServer() {
       } catch (_) {}
 
       const createdUser = {
-        id: generatedId,
+        id: newUserId,
         username: usernameClean,
         name: trimmedName,
         email: internalEmail,
         role: requestedRole,
         status: requestedStatus,
         department: requestedDept,
+        must_change_password: true,
         dateJoined: new Date().toISOString().split('T')[0],
       };
 
       return res.json({
         success: true,
         user: createdUser,
-        message: `Đã cấp tài khoản thành công cho "${usernameClean}" (${trimmedName}).`,
+        message: isExistingAuth
+          ? `Đã đồng bộ thông tin và tạo hồ sơ thành công cho "${usernameClean}" (${trimmedName}).`
+          : `Đã cấp tài khoản thành công cho "${usernameClean}" (${trimmedName}).`,
       });
     } catch (err: any) {
       console.error('API /api/admin-create-user error:', err);

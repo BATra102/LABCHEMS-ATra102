@@ -290,14 +290,14 @@ AS $$
     SELECT 1 
     FROM public.profiles p
     WHERE p.id = auth.uid() 
-      AND p.role IN ('MANAGER', 'ADMIN', 'LAB_MANAGER') 
+      AND p.role IN ('SENIOR_MANAGER', 'MANAGER', 'ADMIN', 'LAB_MANAGER') 
       AND p.status = 'ACTIVE'
       AND (
         NOT EXISTS (SELECT 1 FROM public.system_roles_whitelist)
         OR EXISTS (
           SELECT 1 FROM public.system_roles_whitelist w
           WHERE (LOWER(w.email) = LOWER(p.email) OR LOWER(w.email) = LOWER(COALESCE(p.google_email, '')))
-            AND w.role IN ('MANAGER', 'ADMIN', 'LAB_MANAGER')
+            AND w.role IN ('SENIOR_MANAGER', 'MANAGER', 'ADMIN', 'LAB_MANAGER')
         )
       )
   );
@@ -1140,11 +1140,11 @@ CREATE POLICY "departments_manager" ON public.departments FOR ALL TO authenticat
 DROP POLICY IF EXISTS "profiles_read" ON public.profiles;
 DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 DROP POLICY IF EXISTS "profiles_manager_all" ON public.profiles;
-CREATE POLICY "profiles_read" ON public.profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY "profiles_read" ON public.profiles FOR SELECT TO authenticated, anon USING (true);
 -- TUYỆT ĐỐI KHÔNG TẠO LẠI POLICY profiles_update_own!
 -- USER chỉ được cập nhật thông tin cá nhân an toàn thông qua RPC update_own_profile()
--- CHỈ CÓ QUẢN LÝ (MANAGER) MỚI CÓ QUYỀN UPDATE TRỰC TIẾP PROFILE TRÊN DATABASE
-CREATE POLICY "profiles_manager_all" ON public.profiles FOR ALL TO authenticated USING (public.is_manager());
+-- CHỈ CÓ QUẢN LÝ (MANAGER / SENIOR_MANAGER) MỚI CÓ QUYỀN INSERT/UPDATE TRỰC TIẾP PROFILE TRÊN DATABASE
+CREATE POLICY "profiles_manager_all" ON public.profiles FOR ALL TO authenticated USING (public.is_manager()) WITH CHECK (public.is_manager());
 
 -- 4. Chemicals
 DROP POLICY IF EXISTS "chemicals_read" ON public.chemicals;
@@ -1250,6 +1250,10 @@ ON CONFLICT (name) DO NOTHING;
 -- ====================================================================
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+-- Thắt chặt bảo mật profiles: anon chỉ được SELECT (tra cứu lúc đăng nhập), không được INSERT/UPDATE
+REVOKE INSERT, UPDATE, DELETE ON public.profiles FROM anon;
+GRANT SELECT ON public.profiles TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated, service_role;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated, service_role;
