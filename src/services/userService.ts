@@ -205,124 +205,124 @@ export const userService = {
         }),
       });
 
-      if (response.ok) {
-        const resJson = await response.json();
-        if (resJson.success && resJson.user) {
-          return {
-            success: true,
-            user: resJson.user,
-            message: resJson.message || `Đã cấp tài khoản thành công cho "${trimmedUsername}".`,
-          };
-        }
-        if (!resJson.success && resJson.message) {
-          return {
-            success: false,
-            message: resJson.message,
-          };
-        }
-      } else {
-        try {
-          const errJson = await response.json();
-          if (errJson && errJson.message) {
-            return {
-              success: false,
-              message: errJson.message,
-            };
-          }
-        } catch (_) {}
+      let resJson: any = null;
+      try {
+        resJson = await response.json();
+      } catch (_) {
+        resJson = null;
       }
-    } catch (apiErr) {
-      console.warn('Backend API /api/admin-create-user notice:', apiErr);
-    }
 
-    // 3b. Thử gọi Supabase Edge Function create-user
-    try {
-      const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('create-user', {
-        body: {
-          username: trimmedUsername,
-          full_name: trimmedName,
-          name: trimmedName,
-          password: params.password,
-          role: params.role,
-          status: params.status || 'ACTIVE',
-          department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
-        },
-      });
-
-      if (!edgeErr && edgeData?.success && edgeData?.user) {
+      if (response.ok && resJson?.success && resJson?.user) {
         return {
           success: true,
-          user: edgeData.user,
-          message: edgeData.message || `Đã cấp tài khoản thành công cho "${trimmedUsername}".`,
+          user: resJson.user,
+          message: resJson.message || `Đã cấp tài khoản thành công cho "${trimmedUsername}".`,
         };
       }
-      if (edgeData && !edgeData.success && edgeData.message) {
+
+      if (resJson && !resJson.success && resJson.message) {
         return {
           success: false,
-          message: edgeData.message,
+          message: resJson.message,
         };
       }
-    } catch (edgeEx) {
-      console.warn('Edge Function create-user notice:', edgeEx);
+    } catch (apiErr) {
+      console.warn('Backend API /api/admin-create-user unreachable, attempting direct Supabase fallback:', apiErr);
     }
 
+    // 4. Fallback trực tiếp qua Supabase Client khi API chưa sẵn sàng
     try {
-      // Kiểm tra trùng username trên database
-      const { data: existingUser } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .ilike('username', trimmedUsername)
-        .maybeSingle();
+      // Kiểm tra xem username / member_code đã tồn tại chưa
+      try {
+        const { data: existingUser } = await supabase
+          .from('profiles')
+          .select('id, email, member_code')
+          .or(`email.ilike.${internalEmail},member_code.ilike.${trimmedUsername}`)
+          .maybeSingle();
 
-      if (existingUser) {
+        if (existingUser) {
+          return {
+            success: false,
+            message: `Tên đăng nhập "${trimmedUsername}" hoặc email đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
+          };
+        }
+      } catch (_) {}
+
+      // Tạo tài khoản xác thực độc lập bằng client Supabase không lưu session của quản lý
+      const { getSupabaseConfig } = await import('../lib/supabase');
+      const cfg = getSupabaseConfig();
+      const { createClient } = await import('@supabase/supabase-js');
+      const isolatedClient = createClient(cfg.url, cfg.publishableKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      let authUserId: string | null = null;
+      if (params.password) {
+        const { data: signUpData, error: signUpErr } = await isolatedClient.auth.signUp({
+          email: internalEmail,
+          password: params.password,
+          options: {
+            data: {
+              username: trimmedUsername,
+              member_code: trimmedUsername,
+              full_name: trimmedName,
+              role: params.role,
+              department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
+            },
+          },
+        });
+
+        if (signUpData?.user?.id) {
+          authUserId = signUpData.user.id;
+        } else if (signUpErr) {
+          return {
+            success: false,
+            message: `Không thể tạo tài khoản xác thực Supabase Auth: ${signUpErr.message}`,
+            error: signUpErr,
+          };
+        }
+      }
+
+      if (!authUserId) {
         return {
           success: false,
-          message: `Tên đăng nhập "${trimmedUsername}" đã tồn tại. Vui lòng chọn tên đăng nhập khác!`,
+          message: 'Không thể cấp tài khoản: Chưa nhận được mã định danh từ hệ thống xác thực Supabase Auth.',
         };
       }
 
-      let authUserId: string | null = null;
-      // Tra cứu profile theo username nếu đã tồn tại
-      const { data: existingProf } = await supabase
-        .from('profiles')
-        .select('id')
-        .ilike('username', trimmedUsername)
-        .maybeSingle();
-
-      if (existingProf) {
-        authUserId = existingProf.id;
-      }
-
-      const generatedId = authUserId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `usr-${Date.now().toString(36)}`);
-
-      // 6. Cập nhật / Thêm vào bảng public.profiles bằng client Supabase chung
+      // Lưu hồ sơ vào bảng public.profiles trên Supabase bằng phiên làm việc của Quản lý
       const profilePayload: any = {
-        id: generatedId,
-        username: trimmedUsername,
+        id: authUserId,
         email: internalEmail,
         google_email: internalEmail,
         full_name: trimmedName,
         role: params.role,
         status: params.status || 'ACTIVE',
         department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
+        member_code: trimmedUsername,
         must_change_password: true,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
+      // Thử lưu với username nếu cột tồn tại
       let { error: upsertErr } = await supabase
         .from('profiles')
-        .upsert(profilePayload, { onConflict: 'id' });
+        .upsert({ ...profilePayload, username: trimmedUsername }, { onConflict: 'id' });
 
-      if (upsertErr && (upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
-        const { username: _u, ...payloadWithoutUsername } = profilePayload;
+      if (upsertErr && (upsertErr.code === '42703' || upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
         const retryRes = await supabase
           .from('profiles')
-          .upsert(payloadWithoutUsername, { onConflict: 'id' });
+          .upsert(profilePayload, { onConflict: 'id' });
         upsertErr = retryRes.error;
       }
 
       if (upsertErr) {
-        console.warn('Upsert profile notice:', upsertErr);
+        return {
+          success: false,
+          message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${upsertErr.message}`,
+          error: upsertErr,
+        };
       }
 
       // Nếu vai trò là MANAGER, tự động thêm vào system_roles_whitelist
@@ -339,7 +339,7 @@ export const userService = {
       }
 
       const createdUser: User = {
-        id: generatedId,
+        id: authUserId,
         username: trimmedUsername,
         name: trimmedName,
         email: internalEmail,
@@ -347,29 +347,32 @@ export const userService = {
         status: params.status || 'ACTIVE',
         department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
         dateJoined: new Date().toISOString().split('T')[0],
+        must_change_password: true,
       };
 
-      // 7. Ghi nhận Nhật Ký Kiểm Toán (ACCOUNT_CREATED) - Tuyệt đối không lưu mật khẩu
-      await auditService.log({
-        action: 'ACCOUNT_CREATED',
-        entityType: 'USER',
-        entityId: generatedId,
-        description: `Đã cấp tài khoản mới: Tên đăng nhập "${trimmedUsername}" (${trimmedName}) [Vai trò: ${params.role}, Trạng thái: ${params.status}]`,
-        actorId: callerUser?.id,
-        actorName: callerUser?.name || 'Người quản lý',
-        newData: {
-          username: trimmedUsername,
-          name: trimmedName,
-          role: params.role,
-          status: params.status,
-          department: params.department,
-        },
-      });
+      // 5. Ghi nhận Nhật Ký Kiểm Toán (ACCOUNT_CREATED) - Tuyệt đối không lưu mật khẩu
+      try {
+        await auditService.log({
+          action: 'ACCOUNT_CREATED',
+          entityType: 'USER',
+          entityId: authUserId,
+          description: `Đã cấp tài khoản mới: Tên đăng nhập "${trimmedUsername}" (${trimmedName}) [Vai trò: ${params.role}, Trạng thái: ${params.status}]`,
+          actorId: callerUser?.id,
+          actorName: callerUser?.name || 'Người quản lý',
+          newData: {
+            username: trimmedUsername,
+            name: trimmedName,
+            role: params.role,
+            status: params.status,
+            department: params.department,
+          },
+        });
+      } catch (_) {}
 
       return {
         success: true,
         user: createdUser,
-        message: `Đã cấp tài khoản thành công cho "${trimmedUsername}" (${trimmedName}).`,
+        message: `Đã cấp tài khoản thành công cho "${trimmedUsername}" (${trimmedName}) trên cơ sở dữ liệu Supabase.`,
       };
     } catch (err: any) {
       console.error('Error provisioning user:', err);

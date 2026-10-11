@@ -14,6 +14,7 @@ export const rowToUser = (row: any): User => {
     id: row.id,
     username:
       row.username ||
+      row.member_code ||
       (isSenior
         ? 'manager'
         : row.email
@@ -22,14 +23,14 @@ export const rowToUser = (row: any): User => {
         ? row.google_email.split('@')[0]
         : ''),
     name: row.full_name || (isSenior ? 'Người quản lý cao cấp' : 'Người dùng Lab'),
-    email: row.google_email || row.email || (row.username ? `${row.username}@labchem.internal` : ''),
+    email: row.google_email || row.email || (row.username ? `${row.username}@labchem.vn` : ''),
     role,
     status: ((row.status ? String(row.status).toUpperCase() : 'ACTIVE') as UserStatus),
     department: row.department || 'Bộ môn Dược liệu & Chiết xuất',
     picture: row.avatar_url || undefined,
     position: row.job_title || undefined,
     phone: row.phone || undefined,
-    member_code: row.member_code || undefined,
+    member_code: row.member_code || row.username || undefined,
     notes: row.notes || undefined,
     manager_id: row.manager_id || undefined,
     manager_name: row.manager_name || undefined,
@@ -95,24 +96,13 @@ export const authService = {
         if (!json.success) {
           return { data: null, error: new Error(json.message || 'Tên đăng nhập hoặc mật khẩu không chính xác.') };
         }
-      }
-    } catch (_) {}
-
-    // 1b. Thử gọi Supabase Edge Function login-with-username
-    try {
-      const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('login-with-username', {
-        body: { username: trimmed, password },
-      });
-      if (!edgeErr && edgeData?.success) {
-        if (edgeData.session) {
-          try {
-            await supabase.auth.setSession({
-              access_token: edgeData.session.access_token,
-              refresh_token: edgeData.session.refresh_token,
-            });
-          } catch (_) {}
-        }
-        return { data: edgeData, error: null };
+      } else {
+        try {
+          const errJson = await res.json();
+          if (errJson && !errJson.success && errJson.message) {
+            return { data: null, error: new Error(errJson.message) };
+          }
+        } catch (_) {}
       }
     } catch (_) {}
 
@@ -139,8 +129,8 @@ export const authService = {
       try {
         const { data: prof } = await supabase
           .from('profiles')
-          .select('email, google_email, username')
-          .ilike('username', trimmed)
+          .select('email, google_email, username, member_code')
+          .or(`member_code.ilike.${trimmed},email.ilike.${trimmed}@labchem.vn`)
           .maybeSingle();
 
         if (prof?.email || prof?.google_email) {
@@ -149,35 +139,33 @@ export const authService = {
       } catch (_) {}
 
       if (!internalEmail) {
-        internalEmail = `${trimmed}@labchem.internal`;
+        internalEmail = `${trimmed}@labchem.vn`;
       }
     }
 
-    try {
-      const res = await supabase.auth.signInWithPassword({
-        email: internalEmail,
-        password,
-      });
-      if (res.data?.user) return res;
-      if (internalEmail.endsWith('@labchem.internal')) {
-        const fallbackRes = await supabase.auth.signInWithPassword({
-          email: `${trimmed}@labchem.local`,
+    const emailCandidates: string[] = [internalEmail];
+    const emailVn = `${trimmed.replace(/@.*$/, '')}@labchem.vn`;
+    const emailInternal = `${trimmed.replace(/@.*$/, '')}@labchem.internal`;
+    const emailLocal = `${trimmed.replace(/@.*$/, '')}@labchem.local`;
+    if (!emailCandidates.includes(emailVn)) emailCandidates.push(emailVn);
+    if (!emailCandidates.includes(emailInternal)) emailCandidates.push(emailInternal);
+    if (!emailCandidates.includes(emailLocal)) emailCandidates.push(emailLocal);
+
+    let lastError: any = null;
+    for (const em of emailCandidates) {
+      try {
+        const res = await supabase.auth.signInWithPassword({
+          email: em,
           password,
         });
-        if (fallbackRes.data?.user) return fallbackRes;
+        if (res.data?.user) return { data: res.data, error: null };
+        if (res.error) lastError = res.error;
+      } catch (err: any) {
+        lastError = err;
       }
-      return res;
-    } catch (authEx) {
-      if (internalEmail.endsWith('@labchem.internal')) {
-        try {
-          return await supabase.auth.signInWithPassword({
-            email: `${trimmed}@labchem.local`,
-            password,
-          });
-        } catch (_) {}
-      }
-      throw authEx;
     }
+
+    return { data: null, error: lastError || new Error('Tên đăng nhập hoặc mật khẩu không chính xác.') };
   },
 
   async signInWithPassword(email: string, password: string) {

@@ -211,15 +211,15 @@ export const Header: React.FC<Props> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6">
-        <div className="flex items-center justify-between h-13 sm:h-15 lg:h-16 gap-1 sm:gap-2 lg:gap-2.5 w-full min-w-0">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-4 lg:px-6">
+        <div className="flex items-center justify-between h-12 sm:h-13 lg:h-14 gap-1 sm:gap-2 lg:gap-2.5 w-full min-w-0">
           {/* Zone 1: Wordmark & Mobile Hamburger */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {onOpenMobileMenu && (
               <button
                 type="button"
                 onClick={onOpenMobileMenu}
-                className="md:hidden p-1 sm:p-1.5 text-slate-700 hover:text-cyan-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                className="md:hidden p-1 sm:p-1.5 text-slate-700 hover:text-cyan-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                 title="Mở menu di động"
               >
                 <MenuIcon className="w-5 h-5" />
@@ -231,14 +231,14 @@ export const Header: React.FC<Props> = ({
               className="text-left flex items-center gap-1.5 sm:gap-2 cursor-pointer group"
               title="Về Trang chủ LabChems Anhtra102"
             >
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-linear-to-br from-cyan-600 to-teal-700 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-2xs group-hover:scale-105 transition-transform shrink-0">
+              <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 lg:w-8 lg:h-8 rounded-lg lg:rounded-xl bg-linear-to-br from-cyan-600 to-teal-700 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-2xs group-hover:scale-105 transition-transform shrink-0">
                 LC
               </div>
               <div className="flex flex-col whitespace-nowrap">
-                <span className="text-xs sm:text-base font-extrabold tracking-tight text-slate-900 leading-none group-hover:text-cyan-700 transition-colors">
+                <span className="text-xs sm:text-sm lg:text-base font-extrabold tracking-tight text-slate-900 leading-none group-hover:text-cyan-700 transition-colors">
                   LabChems
                 </span>
-                <span className="text-[9px] sm:text-[11px] font-bold tracking-tight text-cyan-700 leading-none mt-0.5">
+                <span className="text-[9px] sm:text-[10px] lg:text-[11px] font-bold tracking-tight text-cyan-700 leading-none mt-0.5">
                   Anhtra102
                 </span>
               </div>
@@ -251,7 +251,7 @@ export const Header: React.FC<Props> = ({
               <>
                 <button
                   onClick={() => setActiveTab('dashboard')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'dashboard'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -261,7 +261,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('inventory')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'inventory'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -271,7 +271,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('usage')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'usage'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -281,7 +281,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('purchase')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors relative cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors relative cursor-pointer whitespace-nowrap ${
                     activeTab === 'purchase'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -296,7 +296,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('expiry')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'expiry'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -306,7 +306,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('users')}
-                  className={`px-1.5 xl:px-2.5 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors flex items-center gap-1 cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
                     activeTab === 'users'
                       ? 'bg-purple-100 text-purple-900 font-bold'
                       : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50'
@@ -322,7 +322,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('settings')}
-                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors flex items-center gap-1 cursor-pointer ${
+                  className={`px-1.5 xl:px-2 py-1 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
                     activeTab === 'settings'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -338,7 +338,7 @@ export const Header: React.FC<Props> = ({
               <>
                 <button
                   onClick={() => setActiveTab('dashboard')}
-                  className={`px-2 xl:px-3 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-2 xl:px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'dashboard'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -348,7 +348,7 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setActiveTab('inventory')}
-                  className={`px-2 xl:px-3 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-2 xl:px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'inventory'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -358,14 +358,14 @@ export const Header: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => onOpenRecordUsage()}
-                  className="px-2 xl:px-3 py-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg xl:rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-2 xl:px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Ghi sử dụng</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('usage')}
-                  className={`px-2 xl:px-3 py-1 text-xs font-medium rounded-lg xl:rounded-xl transition-colors cursor-pointer ${
+                  className={`px-2 xl:px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'usage'
                       ? 'bg-slate-100 text-slate-900 font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -377,10 +377,10 @@ export const Header: React.FC<Props> = ({
             )}
           </nav>
 
-          {/* Zone 3: Global Header Search Bar (Tự co giãn, không đẩy tràn header trên laptop) */}
-          <div ref={searchRef} className="relative flex-1 min-w-[70px] max-w-[130px] md:max-w-[170px] lg:max-w-[190px] xl:max-w-[260px] hidden sm:block">
+          {/* Zone 3: Global Header Search Bar (Tự co giãn, vừa vặn không tràn trên laptop) */}
+          <div ref={searchRef} className="relative flex-1 min-w-[70px] max-w-[120px] md:max-w-[150px] lg:max-w-[170px] xl:max-w-[200px] 2xl:max-w-[250px] hidden sm:block">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
@@ -392,8 +392,8 @@ export const Header: React.FC<Props> = ({
                   if (searchQuery.trim()) setIsSearchOpen(true);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Tìm nhanh hóa chất, CAS..."
-                className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-100 hover:bg-slate-100/90 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
+                placeholder="Tìm hóa chất, CAS..."
+                className="w-full pl-7.5 pr-6 py-1 text-xs bg-slate-100 hover:bg-slate-100/90 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
               />
               {searchQuery && (
                 <button
@@ -402,7 +402,7 @@ export const Header: React.FC<Props> = ({
                     setSearchQuery('');
                     setIsSearchOpen(false);
                   }}
-                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded transition-colors cursor-pointer"
+                  className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 p-0.5 rounded transition-colors cursor-pointer"
                   title="Xóa tìm kiếm"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -472,12 +472,12 @@ export const Header: React.FC<Props> = ({
 
           {/* Zone 4: Action Buttons, Notification Center, User Profile (Gọn gàng trên cả Mobile & Laptop) */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Chức năng 1: Quét mã nhập kho (Hiển thị từ màn hình lớn xl) */}
+            {/* Chức năng 1: Quét mã nhập kho (Hiển thị trên màn hình rộng 2xl) */}
             {onOpenSupermarketBarcode && (
               <button
                 type="button"
                 onClick={() => onOpenSupermarketBarcode('STOCK_IN')}
-                className="hidden xl:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                className="hidden 2xl:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                 title="Quét mã nhập kho: Quét lặp mã vạch / QR tự động cộng tồn kho"
               >
                 <Barcode className="w-3.5 h-3.5 text-emerald-700" />
@@ -490,7 +490,7 @@ export const Header: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => onOpenSupermarketBarcode('STOCK_OUT')}
-                className="hidden 2xl:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                className="hidden 2xl:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                 title="Quét mã sử dụng hóa chất: Quét mã vạch / QR chai để xuất kho và trừ tồn"
               >
                 <FlaskConical className="w-3.5 h-3.5 text-cyan-700" />
@@ -498,12 +498,12 @@ export const Header: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Chức năng 3: Xuất Báo Cáo PDF & In Ấn */}
+            {/* Chức năng 3: Xuất Báo Cáo PDF & In Ấn (Hiển thị trên màn hình rộng 2xl) */}
             {onOpenPdfReport && (
               <button
                 type="button"
                 onClick={() => onOpenPdfReport('INVENTORY')}
-                className="hidden xl:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                className="hidden 2xl:flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition-all shadow-2xs cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
                 title="Xuất danh sách hóa chất, lịch sử giao dịch ra PDF hoặc lưu trữ định kỳ"
               >
                 <FileText className="w-3.5 h-3.5 text-cyan-700" />
@@ -511,11 +511,11 @@ export const Header: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Cloud Database Status Badge (Tối ưu gọn trên Mobile, đầy đủ trên Laptop) */}
+            {/* Cloud Database Status Badge (Tối ưu gọn gàng theo kích thước màn hình) */}
             {isManager && onOpenSupabaseConfig ? (
               <button
                 onClick={onOpenSupabaseConfig}
-                className={`flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer shrink-0 ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 rounded-lg border text-[11px] font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                   isSupabaseConfigured
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                     : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
@@ -534,16 +534,16 @@ export const Header: React.FC<Props> = ({
                   }`}
                 />
                 <Database className="w-3.5 h-3.5 text-slate-700 shrink-0" />
-                <span className="hidden xl:inline">
-                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kiểm tra...'}
+                <span className="hidden 2xl:inline">
+                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kết nối...'}
                 </span>
-                <span className="hidden md:inline xl:hidden text-[10px]">
+                <span className="hidden md:inline 2xl:hidden text-[10px]">
                   {isSupabaseConfigured ? 'Cloud DB' : 'Đang nối'}
                 </span>
               </button>
             ) : (
               <div
-                className={`flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-xl border text-[11px] font-semibold shrink-0 ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 rounded-lg border text-[11px] font-semibold shrink-0 whitespace-nowrap ${
                   isSupabaseConfigured
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : 'bg-amber-50 text-amber-800 border-amber-300'
@@ -558,10 +558,10 @@ export const Header: React.FC<Props> = ({
                   }`}
                 />
                 <Database className="w-3.5 h-3.5 text-slate-700 shrink-0" />
-                <span className="hidden xl:inline">
-                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kiểm tra...'}
+                <span className="hidden 2xl:inline">
+                  {isSupabaseConfigured ? 'Cloud Database: Đã kết nối' : 'Cloud Database: Đang kết nối...'}
                 </span>
-                <span className="hidden md:inline xl:hidden text-[10px]">
+                <span className="hidden md:inline 2xl:hidden text-[10px]">
                   {isSupabaseConfigured ? 'Cloud DB' : 'Đang nối'}
                 </span>
               </div>
@@ -571,7 +571,7 @@ export const Header: React.FC<Props> = ({
             <div ref={notifRef} className="relative shrink-0">
               <button
                 onClick={() => setNotifDropdownOpen(!notifDropdownOpen)}
-                className="relative p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer shrink-0"
+                className="relative p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer shrink-0"
                 title="Trung tâm thông báo & Email cảnh báo"
               >
                 <Bell className="w-4 h-4" />
@@ -672,9 +672,9 @@ export const Header: React.FC<Props> = ({
             <div ref={userMenuRef} className="relative shrink-0">
               <button
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-1.5 sm:gap-2 p-1 sm:px-2 sm:py-1 text-xs text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer shrink-0"
+                className="flex items-center gap-1.5 sm:gap-2 p-1 sm:px-2 sm:py-1 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer shrink-0"
               >
-                <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden text-slate-800">
+                <div className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden text-slate-800">
                   {currentUser.picture ? (
                     <img src={currentUser.picture} alt={currentUser.name} className="w-full h-full object-cover" />
                   ) : (
@@ -682,7 +682,7 @@ export const Header: React.FC<Props> = ({
                   )}
                 </div>
                 <div className="text-left hidden xl:block">
-                  <div className="font-bold text-slate-900 leading-none truncate max-w-[85px] xl:max-w-[110px] flex items-center gap-1">
+                  <div className="font-bold text-slate-900 leading-none truncate max-w-[75px] xl:max-w-[90px] 2xl:max-w-[120px] flex items-center gap-1">
                     <span>{currentUser.name}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
@@ -847,9 +847,9 @@ export const Header: React.FC<Props> = ({
         </div>
 
         {/* Mobile Search Bar (Compact, Single-Line, Clean) */}
-        <div className="sm:hidden pb-2 pt-0.5 border-t border-slate-100">
+        <div className="sm:hidden px-2 pb-1.5 pt-1 border-t border-slate-100">
           <div ref={mobileSearchRef} className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -862,7 +862,7 @@ export const Header: React.FC<Props> = ({
               }}
               onKeyDown={handleSearchKeyDown}
               placeholder="Tìm nhanh hóa chất, CAS..."
-              className="w-full pl-8 pr-8 py-1.5 text-xs bg-slate-100 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
+              className="w-full pl-7.5 pr-7 py-1 text-xs bg-slate-100 focus:bg-white border border-slate-200 focus:border-cyan-600 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-hidden transition-all shadow-2xs"
             />
             {searchQuery && (
               <button
@@ -871,7 +871,7 @@ export const Header: React.FC<Props> = ({
                   setSearchQuery('');
                   setIsSearchOpen(false);
                 }}
-                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
                 title="Xóa tìm kiếm"
               >
                 <X className="w-3.5 h-3.5" />

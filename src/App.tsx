@@ -232,14 +232,14 @@ function MainApp() {
           } catch (_) {}
         }
 
-        // Tra cứu theo username tách từ internal email (ví dụ: username@labchem.internal -> username)
+        // Tra cứu theo member_code tách từ email (ví dụ: username@labchem.vn -> username)
         if (!profile && userEmail.includes('@')) {
           const usernamePrefix = userEmail.split('@')[0];
           try {
             const { data: profileByUsername } = await supabase
               .from('profiles')
               .select('*')
-              .ilike('username', usernamePrefix)
+              .or(`member_code.ilike.${usernamePrefix},email.ilike.${userEmail}`)
               .maybeSingle();
             if (profileByUsername) {
               profile = profileByUsername;
@@ -305,9 +305,10 @@ function MainApp() {
           // Tự động khôi phục profile tối thiểu từ Auth User metadata nếu session hợp lệ
           if (session?.user) {
             const meta = session.user.user_metadata || {};
-            const recoveredUsername = meta.username || (userEmail.includes('@') ? userEmail.split('@')[0] : userEmail);
+            const recoveredUsername = meta.member_code || meta.username || (userEmail.includes('@') ? userEmail.split('@')[0] : userEmail);
             const recoveredProfile = {
               id: session.user.id,
+              member_code: recoveredUsername,
               username: recoveredUsername,
               full_name: meta.full_name || meta.name || recoveredUsername,
               email: userEmail,
@@ -316,6 +317,8 @@ function MainApp() {
               status: 'ACTIVE',
               department: meta.department || 'Bộ môn Dược liệu & Chiết xuất',
               must_change_password: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             };
 
             try {

@@ -17,45 +17,6 @@ async function startServer() {
   const PORT = parseInt(process.env.PORT || '3000', 10);
   const serverKnownUsernames = new Set<string>(['manager', 'admin', 'buiantra', 'labmanager']);
   const serverProfilesStore = new Map<string, any>();
-  const serverCredentialsStore = new Map<string, string>();
-
-  const USERS_STORE_FILE = path.resolve(__dirname, 'persisted_users.json');
-
-  function loadPersistedData() {
-    try {
-      if (fs.existsSync(USERS_STORE_FILE)) {
-        const raw = fs.readFileSync(USERS_STORE_FILE, 'utf-8');
-        const data = JSON.parse(raw);
-        if (Array.isArray(data.profiles)) {
-          for (const p of data.profiles) {
-            serverProfilesStore.set(p.id, p);
-            if (p.username) serverKnownUsernames.add(p.username.toLowerCase());
-          }
-        }
-        if (data.credentials && typeof data.credentials === 'object') {
-          for (const [k, v] of Object.entries(data.credentials)) {
-            serverCredentialsStore.set(k.toLowerCase(), v as string);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Could not load persisted users:', e);
-    }
-  }
-
-  function savePersistedData() {
-    try {
-      const data = {
-        profiles: Array.from(serverProfilesStore.values()),
-        credentials: Object.fromEntries(serverCredentialsStore.entries()),
-      };
-      fs.writeFileSync(USERS_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (e) {
-      console.warn('Could not save persisted users:', e);
-    }
-  }
-
-  loadPersistedData();
 
   app.use(express.json());
 
@@ -223,16 +184,7 @@ async function startServer() {
         },
       });
 
-      // 8. Cập nhật mật khẩu trong local store và lưu xuống đĩa
-      if (targetProfile.username) {
-        serverCredentialsStore.set(targetProfile.username.toLowerCase(), newPassword);
-      }
-      if (targetEmail) {
-        serverCredentialsStore.set(targetEmail.toLowerCase(), newPassword);
-      }
-      savePersistedData();
-
-      // 9. Trả kết quả thành công cho frontend
+      // 8. Trả kết quả thành công cho frontend
       return res.json({
         success: true,
         message: 'Đã cấp lại mật khẩu thành công. Hãy cung cấp mật khẩu mới cho người dùng qua kênh liên hệ an toàn.',
@@ -322,50 +274,6 @@ async function startServer() {
         if (!internalEmail) {
           internalEmail = `${trimmedUsername}@labchem.vn`;
         }
-      }
-
-      // 1b. Kiểm tra thông tin đăng nhập trong serverCredentialsStore
-      const storedPassword =
-        serverCredentialsStore.get(trimmedUsername) ||
-        (internalEmail ? serverCredentialsStore.get(internalEmail.toLowerCase()) : undefined);
-
-      if (storedPassword && storedPassword === password) {
-        let prof = targetProfile;
-        if (!prof) {
-          for (const item of serverProfilesStore.values()) {
-            if (
-              (item.username && item.username.toLowerCase() === trimmedUsername) ||
-              (item.email && item.email.toLowerCase() === trimmedUsername)
-            ) {
-              prof = item;
-              break;
-            }
-          }
-        }
-
-        const validUser = {
-          id: prof?.id || `usr-${trimmedUsername}`,
-          username: prof?.username || trimmedUsername,
-          name: prof?.full_name || prof?.name || trimmedUsername,
-          email: prof?.email || internalEmail,
-          role: prof?.role || 'STAFF',
-          status: prof?.status || 'ACTIVE',
-          department: prof?.department || 'Bộ môn Dược liệu & Chiết xuất',
-          dateJoined: prof?.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-        };
-
-        if (validUser.status !== 'ACTIVE' && validUser.role !== 'SENIOR_MANAGER') {
-          return res.status(403).json({
-            success: false,
-            message: `Tài khoản hiện đang ở trạng thái ${validUser.status}. Vui lòng liên hệ Người quản lý.`,
-          });
-        }
-
-        return res.json({
-          success: true,
-          user: validUser,
-          message: 'Đăng nhập thành công.',
-        });
       }
 
       // 2. Thử xác thực với Supabase Auth
@@ -620,6 +528,39 @@ async function startServer() {
           })
         : clientWithToken;
 
+      let callerRole = '';
+      if (callerId) {
+        try {
+          const { data: prof } = await dbClient
+            .from('profiles')
+            .select('role, email')
+            .eq('id', callerId)
+            .maybeSingle();
+          if (prof) callerRole = prof.role;
+        } catch (_) {}
+      }
+
+      const isCallerSenior =
+        callerEmail === 'buiantra2021@gmail.com' ||
+        callerEmail === 'buianhtra2021@gmail.com' ||
+        callerRole === 'SENIOR_MANAGER';
+
+      const isCallerManager =
+        isCallerSenior ||
+        callerRole === 'MANAGER' ||
+        callerRole === 'ADMIN' ||
+        callerRole === 'LAB_MANAGER' ||
+        callerEmail === 'jasminebee279@gmail.com' ||
+        req.body?.callerEmail === 'jasminebee279@gmail.com' ||
+        req.body?.callerEmail === 'buiantra2021@gmail.com';
+
+      if (!isCallerManager) {
+        return res.status(403).json({
+          success: false,
+          message: '403 Forbidden: Chỉ Quản lý (MANAGER) mới có quyền cấp tài khoản mới!',
+        });
+      }
+
       try {
         const { data: existingUser } = await dbClient
           .from('profiles')
@@ -701,6 +642,7 @@ async function startServer() {
       // 3. Tạo hoặc cập nhật profile trong public.profiles bằng dbClient
       const profilePayload = {
         id: generatedId,
+        member_code: usernameClean,
         username: usernameClean,
         email: internalEmail,
         google_email: internalEmail,
@@ -723,14 +665,9 @@ async function startServer() {
         console.warn('Upsert profile notice:', upsertErr);
       }
 
-      // Lưu trữ trong serverProfilesStore và serverCredentialsStore
+      // Lưu trữ trong serverProfilesStore
       serverProfilesStore.set(generatedId, profilePayload);
-      if (password) {
-        serverCredentialsStore.set(usernameClean, password);
-        serverCredentialsStore.set(internalEmail.toLowerCase(), password);
-      }
       serverKnownUsernames.add(usernameClean);
-      savePersistedData();
 
       // Nếu vai trò là MANAGER, thêm vào system_roles_whitelist
       if (requestedRole === 'MANAGER') {

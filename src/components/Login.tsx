@@ -167,98 +167,91 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
         return;
       }
 
-      // 2. FLOW ĐĂNG NHẬP CHUẨN: USERNAME -> internalAuthEmail -> supabase.auth.signInWithPassword
-      let internalAuthEmail = '';
-      let existingProfileByUsername: any = null;
+      // 2. FLOW ĐĂNG NHẬP CHUẨN: TÊN ĐĂNG NHẬP / EMAIL -> internalAuthEmails
+      const cleanUsername = trimmedInput.replace(/@labchem\.(vn|internal|local|com)$/, '').replace(/@.*$/, '');
+      const emailCandidates: string[] = [];
 
       if (trimmedInput.includes('@')) {
-        internalAuthEmail = trimmedInput;
+        emailCandidates.push(trimmedInput);
       } else if (isSenior) {
-        internalAuthEmail = 'buiantra2021@gmail.com';
+        emailCandidates.push('buiantra2021@gmail.com');
       } else if (isDesignatedManager) {
-        internalAuthEmail = 'jasminebee279@gmail.com';
+        emailCandidates.push('jasminebee279@gmail.com');
       } else {
-        // Tra cứu profile trong database theo username (chuẩn hóa không phân biệt chữ hoa/thường)
-        try {
-          const { data: prof } = await supabase
-            .from('profiles')
-            .select('*')
-            .ilike('username', trimmedInput)
-            .maybeSingle();
-
-          if (prof) {
-            existingProfileByUsername = prof;
-            internalAuthEmail = prof.email || prof.google_email || `${trimmedInput}@labchem.internal`;
-          }
-        } catch (_) {}
-
-        if (!internalAuthEmail) {
-          internalAuthEmail = `${trimmedInput}@labchem.internal`;
-        }
+        // Ưu tiên chuẩn của hệ thống: @labchem.vn, sau đó là internal & local
+        emailCandidates.push(`${cleanUsername}@labchem.vn`);
+        emailCandidates.push(`${cleanUsername}@labchem.internal`);
+        emailCandidates.push(`${cleanUsername}@labchem.local`);
       }
 
-      // 3. Thực hiện xác thực Supabase Auth bằng email kỹ thuật nội bộ & mật khẩu người dùng nhập
+      // Tra cứu profile trong database theo member_code hoặc email nếu đã có
+      let existingProfileByUsername: any = null;
+      try {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`member_code.ilike.${cleanUsername},email.ilike.${cleanUsername}@labchem.vn`)
+          .maybeSingle();
+
+        if (prof) {
+          existingProfileByUsername = prof;
+          const profEmail = (prof.email || prof.google_email || '').toLowerCase();
+          if (profEmail && !emailCandidates.includes(profEmail)) {
+            emailCandidates.unshift(profEmail);
+          }
+        }
+      } catch (_) {}
+
+      // 3. Thực hiện xác thực Supabase Auth bằng danh sách email ứng cử viên & mật khẩu
       let authUser: any = null;
       let authSession: any = null;
       let authError: any = null;
+      let matchedEmail = '';
 
-      try {
-        const { data: authData, error: err } = await supabase.auth.signInWithPassword({
-          email: internalAuthEmail,
-          password,
-        });
-
-        if (!err && authData?.user) {
-          authUser = authData.user;
-          authSession = authData.session;
-        } else {
-          authError = err;
-        }
-      } catch (ex: any) {
-        authError = ex;
-      }
-
-      // Thử fallback sang email đuôi @labchem.local nếu tài khoản được cấp trước đó dùng đuôi local
-      if ((!authUser || authError) && internalAuthEmail.endsWith('@labchem.internal')) {
+      for (const candidate of emailCandidates) {
         try {
-          const { data: localAuthData, error: localErr } = await supabase.auth.signInWithPassword({
-            email: `${trimmedInput}@labchem.local`,
+          const { data: authData, error: err } = await supabase.auth.signInWithPassword({
+            email: candidate,
             password,
           });
-          if (!localErr && localAuthData?.user) {
-            authUser = localAuthData.user;
-            authSession = localAuthData.session;
+
+          if (!err && authData?.user) {
+            authUser = authData.user;
+            authSession = authData.session;
+            matchedEmail = candidate;
             authError = null;
-            internalAuthEmail = `${trimmedInput}@labchem.local`;
+            break;
+          } else if (err) {
+            authError = err;
           }
-        } catch (_) {}
+        } catch (ex: any) {
+          authError = ex;
+        }
       }
 
       // Thử fallback đăng nhập qua Backend API nếu Supabase Auth client gặp sự cố mạng hoặc session
       if (!authUser || authError) {
-        if (!trimmedInput.includes('@')) {
-          try {
-            const resp = await fetch('/api/login-with-username', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username: trimmedInput, password }),
-            });
-            const resData = await resp.json();
-            if (resp.ok && resData.success && resData.user) {
-              if (resData.session?.access_token) {
-                try {
-                  await supabase.auth.setSession({
-                    access_token: resData.session.access_token,
-                    refresh_token: resData.session.refresh_token,
-                  });
-                } catch (_) {}
-              }
-              await handleLoginSuccess(resData.user, 'USERNAME_PASSWORD_API');
-              setIsLoading(false);
-              return;
+        try {
+          const resp = await fetch('/api/login-with-username', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: trimmedInput, password }),
+          });
+          const resData = await resp.json();
+          if (resp.ok && resData.success && resData.user) {
+            if (resData.session?.access_token) {
+              try {
+                await supabase.auth.setSession({
+                  access_token: resData.session.access_token,
+                  refresh_token: resData.session.refresh_token,
+                });
+              } catch (_) {}
             }
-          } catch (_) {}
-        }
+            await handleLoginSuccess(resData.user, 'USERNAME_PASSWORD_API');
+            setIsLoading(false);
+            return;
+          }
+        } catch (_) {}
 
         // Nếu là Quản lý đăng nhập đúng mật khẩu chuẩn hoặc Supabase báo Email not confirmed
         if (isDesignatedManager && (isStandardManagerPassword || authError?.message?.includes('Email not confirmed'))) {
@@ -310,7 +303,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
       // Không được signOut khi chưa hoàn tất kiểm tra đa tầng
       let profile = existingProfileByUsername;
 
-      if (!profile) {
+      if (!profile && authUser?.id) {
         try {
           const { data: pById } = await supabase
             .from('profiles')
@@ -323,23 +316,12 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
 
       if (!profile) {
         try {
-          const { data: pByUsername } = await supabase
+          const { data: pByMemberCode } = await supabase
             .from('profiles')
             .select('*')
-            .ilike('username', trimmedInput)
+            .or(`member_code.ilike.${cleanUsername},email.ilike.${matchedEmail || trimmedInput}`)
             .maybeSingle();
-          if (pByUsername) profile = pByUsername;
-        } catch (_) {}
-      }
-
-      if (!profile) {
-        try {
-          const { data: pByEmail } = await supabase
-            .from('profiles')
-            .select('*')
-            .or(`email.ilike.${internalAuthEmail},google_email.ilike.${internalAuthEmail}`)
-            .maybeSingle();
-          if (pByEmail) profile = pByEmail;
+          if (pByMemberCode) profile = pByMemberCode;
         } catch (_) {}
       }
 
@@ -353,8 +335,9 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
               profile = uData.data.find(
                 (x: any) =>
                   x.id === authUser.id ||
-                  (x.username && x.username.toLowerCase() === trimmedInput) ||
-                  (x.email && x.email.toLowerCase() === internalAuthEmail.toLowerCase())
+                  (x.username && x.username.toLowerCase() === cleanUsername.toLowerCase()) ||
+                  (x.member_code && x.member_code.toLowerCase() === cleanUsername.toLowerCase()) ||
+                  (x.email && x.email.toLowerCase() === (matchedEmail || trimmedInput).toLowerCase())
               );
             }
           }
@@ -391,14 +374,17 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
         const userMeta = authUser.user_metadata || {};
         profile = {
           id: authUser.id,
-          username: userMeta.username || trimmedInput,
-          full_name: userMeta.full_name || trimmedInput,
-          email: authUser.email || internalAuthEmail,
-          google_email: authUser.email || internalAuthEmail,
+          member_code: userMeta.member_code || userMeta.username || cleanUsername,
+          username: userMeta.username || userMeta.member_code || cleanUsername,
+          full_name: userMeta.full_name || userMeta.name || cleanUsername,
+          email: authUser.email || matchedEmail || `${cleanUsername}@labchem.vn`,
+          google_email: authUser.email || matchedEmail || `${cleanUsername}@labchem.vn`,
           role: userMeta.role || 'STAFF',
           status: 'ACTIVE',
           department: userMeta.department || 'Bộ môn Dược liệu & Chiết xuất',
           must_change_password: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         };
 
         // Lưu profile này vào public.profiles
