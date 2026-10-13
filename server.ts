@@ -437,11 +437,22 @@ async function startServer() {
         if (isSeniorManager) {
           targetProfile = {
             id: authUser.id,
-            username: 'manager',
-            full_name: 'Người quản lý cao cấp',
+            username: 'buiantra',
+            full_name: 'Bùi Anh Trà (Người quản lý cao cấp)',
+            email: 'buiantra2021@gmail.com',
             role: 'SENIOR_MANAGER',
             status: 'ACTIVE',
             department: 'Ban Quản Trị Hệ Thống',
+          };
+        } else if (isLabManager) {
+          targetProfile = {
+            id: authUser.id,
+            username: 'jasminebee279',
+            full_name: 'Người quản lý Lab',
+            email: 'jasminebee279@gmail.com',
+            role: 'MANAGER',
+            status: 'ACTIVE',
+            department: 'Bộ môn Dược liệu & Chiết xuất',
           };
         } else {
           return res.status(403).json({
@@ -451,8 +462,25 @@ async function startServer() {
         }
       }
 
+      // Đảm bảo Người quản lý cao cấp và Người quản lý Lab luôn có role và status ACTIVE
+      const isSeniorByEmail =
+        isSeniorManager ||
+        targetProfile.email === 'buiantra2021@gmail.com' ||
+        targetProfile.google_email === 'buiantra2021@gmail.com' ||
+        targetProfile.email === 'buianhtra2021@gmail.com' ||
+        targetProfile.role === 'SENIOR_MANAGER';
+
+      if (isSeniorByEmail) {
+        targetProfile.role = 'SENIOR_MANAGER';
+        targetProfile.status = 'ACTIVE';
+      }
+      if (isLabManager || targetProfile.email === 'jasminebee279@gmail.com' || targetProfile.google_email === 'jasminebee279@gmail.com') {
+        if (!targetProfile.role || targetProfile.role === 'USER') targetProfile.role = 'MANAGER';
+        targetProfile.status = 'ACTIVE';
+      }
+
       // 5. Kiểm tra status = ACTIVE
-      if (targetProfile.status !== 'ACTIVE' && targetProfile.role !== 'SENIOR_MANAGER') {
+      if (targetProfile.status !== 'ACTIVE' && targetProfile.role !== 'SENIOR_MANAGER' && targetProfile.role !== 'MANAGER') {
         const statusMsg =
           targetProfile.status === 'LOCKED'
             ? 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Người quản lý.'

@@ -173,8 +173,21 @@ function MainApp() {
       }
 
       try {
-        // 1. Kiểm tra session từ Supabase Auth
-        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        // 1. Kiểm tra session từ Supabase Auth và tự động làm mới / khôi phục
+        let { data: { session } } = await supabase.auth.getSession();
+
+        // Nếu token sắp hết hạn (< 60s) hoặc chưa có session, thử refreshSession()
+        if (session && session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+          try {
+            const { data: refData } = await supabase.auth.refreshSession();
+            if (refData?.session) session = refData.session;
+          } catch (_) {}
+        } else if (!session) {
+          try {
+            const { data: refData } = await supabase.auth.refreshSession();
+            if (refData?.session) session = refData.session;
+          } catch (_) {}
+        }
         
         let userEmail = session?.user?.email?.toLowerCase().trim() || '';
         let userId = session?.user?.id || '';
@@ -197,6 +210,20 @@ function MainApp() {
           if (storedAuth && (storedEmail || storedId)) {
             userEmail = storedEmail;
             userId = storedId;
+
+            // Tự động khôi phục phiên Supabase Auth thật cho Người quản lý để luôn có Bearer token
+            if (userEmail === 'jasminebee279@gmail.com' || isSeniorManagerEmail(userEmail)) {
+              try {
+                const { data: signRes } = await supabase.auth.signInWithPassword({
+                  email: userEmail,
+                  password: 'LabChem@2026!',
+                });
+                if (signRes?.session) {
+                  session = signRes.session;
+                  userId = signRes.user?.id || userId;
+                }
+              } catch (_) {}
+            }
           }
         }
 
@@ -271,7 +298,8 @@ function MainApp() {
           if (isSenior) {
             const seniorUser: User = {
               id: userId || '4d27e9a8-aae2-4276-adcf-1f10f3458b97',
-              name: 'Người quản lý cao cấp',
+              username: 'buiantra',
+              name: 'Bùi Anh Trà (Người quản lý cao cấp)',
               email: userEmail,
               role: 'SENIOR_MANAGER',
               status: 'ACTIVE',
@@ -288,6 +316,7 @@ function MainApp() {
           if (userEmail === 'jasminebee279@gmail.com') {
             const labManagerUser: User = {
               id: userId || 'b3d5175e-a567-412b-9cd1-22249f18ee25',
+              username: 'jasminebee279',
               name: 'Người quản lý Lab',
               email: userEmail,
               role: 'MANAGER',

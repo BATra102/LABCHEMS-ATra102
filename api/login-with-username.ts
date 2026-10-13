@@ -271,18 +271,35 @@ export default async function handler(req: any, res: any) {
       } catch (_) {}
     }
 
+    const isSeniorEmail = internalEmail === 'buiantra2021@gmail.com' || isSeniorManager;
+    const isLabMgrEmail = internalEmail === 'jasminebee279@gmail.com' || isLabManager;
+
+    const assignedRole = isSeniorEmail
+      ? 'SENIOR_MANAGER'
+      : isLabMgrEmail
+      ? 'MANAGER'
+      : targetProfile?.role || authUser.user_metadata?.role || 'STAFF';
+
+    const assignedStatus = isSeniorEmail || isLabMgrEmail
+      ? 'ACTIVE'
+      : targetProfile?.status || 'ACTIVE';
+
     const returnedUser = {
       id: authUser.id,
       username: targetProfile?.username || targetProfile?.member_code || trimmedInput,
-      name: targetProfile?.full_name || authUser.user_metadata?.full_name || trimmedInput,
+      name: isSeniorEmail
+        ? 'Bùi Anh Trà (Người quản lý cao cấp)'
+        : isLabMgrEmail
+        ? 'Người quản lý Lab'
+        : targetProfile?.full_name || authUser.user_metadata?.full_name || trimmedInput,
       email: targetProfile?.email || internalEmail,
-      role: targetProfile?.role || authUser.user_metadata?.role || 'STAFF',
-      status: targetProfile?.status || 'ACTIVE',
+      role: assignedRole,
+      status: assignedStatus,
       department: targetProfile?.department || 'Bộ môn Dược liệu & Chiết xuất',
       must_change_password: Boolean(targetProfile?.must_change_password),
     };
 
-    if (returnedUser.status !== 'ACTIVE' && returnedUser.role !== 'SENIOR_MANAGER') {
+    if (returnedUser.status !== 'ACTIVE' && returnedUser.role !== 'SENIOR_MANAGER' && returnedUser.role !== 'MANAGER' && !isLabManager) {
       return res.status(403).json({
         success: false,
         message: `Tài khoản của bạn hiện đang ở trạng thái ${returnedUser.status}. Vui lòng liên hệ Người quản lý để được kích hoạt.`,
