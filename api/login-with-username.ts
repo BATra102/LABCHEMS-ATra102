@@ -46,8 +46,9 @@ export default async function handler(req: any, res: any) {
     }
 
     const trimmedInput = String(username).trim().toLowerCase();
+    const isSbSecret = SUPABASE_SERVICE_ROLE_KEY.startsWith('sb_secret_');
     const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const dbClient = SUPABASE_SERVICE_ROLE_KEY
+    const dbClient = SUPABASE_SERVICE_ROLE_KEY && !isSbSecret
       ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
           auth: { autoRefreshToken: false, persistSession: false },
         })
@@ -213,22 +214,6 @@ export default async function handler(req: any, res: any) {
             });
           }
 
-          // Đảm bảo hồ sơ tồn tại trong profiles
-          await adminAuth.from('profiles').upsert(
-            {
-              id: existingAuthUser?.id || mgrUser.id,
-              username: mgrUser.username,
-              member_code: mgrUser.username,
-              full_name: mgrUser.name,
-              email: mgrUser.email,
-              google_email: mgrUser.email,
-              role: mgrUser.role,
-              status: mgrUser.status,
-              department: mgrUser.department,
-            },
-            { onConflict: 'id' }
-          );
-
           const { data: signInRes } = await client.auth.signInWithPassword({
             email: mgrUser.email,
             password,
@@ -236,6 +221,31 @@ export default async function handler(req: any, res: any) {
           if (signInRes?.session) {
             session = signInRes.session;
           }
+
+          // Đảm bảo hồ sơ tồn tại trong profiles
+          try {
+            const clientForProfile = session?.access_token
+              ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                  global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                  auth: { autoRefreshToken: false, persistSession: false },
+                })
+              : (!isSbSecret ? adminAuth : client);
+
+            await clientForProfile.from('profiles').upsert(
+              {
+                id: existingAuthUser?.id || mgrUser.id,
+                username: mgrUser.username,
+                member_code: mgrUser.username,
+                full_name: mgrUser.name,
+                email: mgrUser.email,
+                google_email: mgrUser.email,
+                role: mgrUser.role,
+                status: mgrUser.status,
+                department: mgrUser.department,
+              },
+              { onConflict: 'id' }
+            );
+          } catch (_) {}
         } catch (syncEx) {
           console.warn('Sync manager auth session notice:', syncEx);
         }

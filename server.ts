@@ -60,7 +60,12 @@ async function startServer() {
         process.env.VITE_SUPABASE_ANON_KEY ||
         process.env.SUPABASE_ANON_KEY ||
         'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const supabaseServiceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SECRET_KEY ||
+        process.env.SERVICE_ROLE_KEY ||
+        '';
 
       if (!supabaseUrl || !supabaseAnonKey) {
         return res.status(500).json({
@@ -111,6 +116,15 @@ async function startServer() {
         });
       }
 
+      // Kiểm tra cấu hình máy chủ SUPABASE_SERVICE_ROLE_KEY
+      if (!supabaseServiceKey) {
+        return res.status(500).json({
+          success: false,
+          message:
+            'Lỗi cấu hình máy chủ: Chưa cấu hình biến môi trường SUPABASE_SERVICE_ROLE_KEY trên Vercel. Vui lòng vào Vercel Dashboard -> Settings -> Environment Variables và thêm biến SUPABASE_SERVICE_ROLE_KEY để kích hoạt API quản trị viên.',
+        });
+      }
+
       // 3. Kiểm tra tài khoản đích có tồn tại trong hệ thống
       const { data: targetProfile, error: targetProfileErr } = await clientWithToken
         .from('profiles')
@@ -141,23 +155,21 @@ async function startServer() {
         });
       }
 
-      // 5. Cập nhật mật khẩu thật trong Supabase Auth phía server (nếu có service_role key)
-      if (supabaseServiceKey) {
-        const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
-          auth: { autoRefreshToken: false, persistSession: false },
-        });
+      // 5. Cập nhật mật khẩu thật trong Supabase Auth phía server bằng adminClient
+      const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
 
-        const { error: adminUpdateErr } = await adminClient.auth.admin.updateUserById(targetUserId, {
-          password: newPassword,
-        });
+      const { error: adminUpdateErr } = await adminClient.auth.admin.updateUserById(targetUserId, {
+        password: newPassword,
+      });
 
-        if (adminUpdateErr) {
-          console.error('Server admin updateUserById error:', adminUpdateErr);
-          return res.status(500).json({
-            success: false,
-            message: adminUpdateErr.message || 'Lỗi khi cập nhật mật khẩu trên Supabase Auth.',
-          });
-        }
+      if (adminUpdateErr) {
+        console.error('Server admin updateUserById error:', adminUpdateErr);
+        return res.status(500).json({
+          success: false,
+          message: adminUpdateErr.message || 'Lỗi khi cập nhật mật khẩu trên Supabase Auth.',
+        });
       }
 
       // 6. Đặt cờ must_change_password = true, giữ nguyên trạng thái ACTIVE/LOCKED hiện tại
@@ -384,21 +396,6 @@ async function startServer() {
               });
             }
 
-            await adminAuth.from('profiles').upsert(
-              {
-                id: existingAuth?.id || mgrUser.id,
-                username: mgrUser.username,
-                member_code: mgrUser.username,
-                full_name: mgrUser.name,
-                email: mgrUser.email,
-                google_email: mgrUser.email,
-                role: mgrUser.role,
-                status: mgrUser.status,
-                department: mgrUser.department,
-              },
-              { onConflict: 'id' }
-            );
-
             const { data: signInRes } = await client.auth.signInWithPassword({
               email: mgrUser.email,
               password,
@@ -406,6 +403,31 @@ async function startServer() {
             if (signInRes?.session) {
               session = signInRes.session;
             }
+
+            try {
+              const isSbSecret = supabaseServiceKey.startsWith('sb_secret_');
+              const clientForProfile = session?.access_token
+                ? createClient(supabaseUrl, supabaseAnonKey, {
+                    global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                    auth: { autoRefreshToken: false, persistSession: false },
+                  })
+                : (!isSbSecret ? adminAuth : client);
+
+              await clientForProfile.from('profiles').upsert(
+                {
+                  id: existingAuth?.id || mgrUser.id,
+                  username: mgrUser.username,
+                  member_code: mgrUser.username,
+                  full_name: mgrUser.name,
+                  email: mgrUser.email,
+                  google_email: mgrUser.email,
+                  role: mgrUser.role,
+                  status: mgrUser.status,
+                  department: mgrUser.department,
+                },
+                { onConflict: 'id' }
+              );
+            } catch (_) {}
           } catch (syncErr) {
             console.warn('Sync manager session error in server.ts:', syncErr);
           }
@@ -907,18 +929,42 @@ async function startServer() {
         process.env.VITE_SUPABASE_ANON_KEY ||
         process.env.SUPABASE_ANON_KEY ||
         'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const authHeader = req.headers.authorization;
+      const supabaseServiceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SECRET_KEY ||
+        process.env.SERVICE_ROLE_KEY ||
+        '';
 
-      const client = supabaseServiceKey
+      const isSbSecret = supabaseServiceKey.startsWith('sb_secret_');
+      let client = authHeader && authHeader.startsWith('Bearer ')
+        ? createClient(supabaseUrl, supabaseAnonKey, {
+            global: { headers: { Authorization: authHeader } },
+            auth: { autoRefreshToken: false, persistSession: false },
+          })
+        : supabaseServiceKey && !isSbSecret
         ? createClient(supabaseUrl, supabaseServiceKey, {
             auth: { autoRefreshToken: false, persistSession: false },
           })
         : createClient(supabaseUrl, supabaseAnonKey);
 
-      const { data, error } = await client
+      let { data, error } = await client
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
+
+      if (error && (isSbSecret || authHeader)) {
+        const fallbackClient = createClient(supabaseUrl, supabaseAnonKey);
+        const fbRes = await fallbackClient
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!fbRes.error && fbRes.data) {
+          data = fbRes.data;
+          error = null;
+        }
+      }
 
       // Hợp nhất dữ liệu giữa Supabase và serverProfilesStore
       const mergedMap = new Map<string, any>();

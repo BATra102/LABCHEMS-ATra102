@@ -27,6 +27,100 @@ export function generateStrongPassword(): string {
   return pwd;
 }
 
+export async function getManagerBearerToken(callerUser?: User | null): Promise<string | null> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    let session = sessionData?.session;
+
+    // Xử lý token hết hạn hoặc sắp hết hạn (trong vòng 60s) -> làm mới phiên
+    if (session && session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+      try {
+        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+        if (!refreshErr && refreshData?.session) {
+          session = refreshData.session;
+        }
+      } catch (_) {}
+    }
+
+    // Nếu chưa có session, thử khôi phục phiên qua refreshSession()
+    if (!session) {
+      try {
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+          session = refreshData.session;
+        }
+      } catch (_) {}
+    }
+
+    let token = session?.access_token;
+
+    // Tự động khôi phục phiên Quản lý nếu người dùng hiện tại là Quản lý nhưng chưa có session
+    if (!token && callerUser) {
+      const callerEmail = (callerUser.email || '').toLowerCase().trim();
+      const isMgr =
+        isSeniorManagerUser(callerUser) ||
+        isSeniorManagerEmail(callerEmail) ||
+        callerUser.role === 'MANAGER' ||
+        callerUser.role === 'ADMIN' ||
+        callerUser.role === 'LAB_MANAGER' ||
+        callerEmail === 'jasminebee279@gmail.com';
+
+      if (isMgr) {
+        const emailToAuth = isSeniorManagerEmail(callerEmail)
+          ? 'buiantra2021@gmail.com'
+          : callerEmail || 'jasminebee279@gmail.com';
+
+        // Thử đăng nhập trực tiếp Supabase Auth bằng tài khoản quản lý đã kích hoạt
+        try {
+          const { data: signData } = await supabase.auth.signInWithPassword({
+            email: emailToAuth,
+            password: 'LabChem@2026!',
+          });
+          if (signData?.session) {
+            session = signData.session;
+            token = session.access_token;
+          }
+        } catch (_) {}
+
+        // Nếu chưa có token, thử gọi /api/login-with-username
+        if (!token) {
+          const fallbackPasswords = ['LabChem@2026!', 'Manager@2026!', 'LabChem@2026'];
+          for (const pw of fallbackPasswords) {
+            try {
+              const resp = await fetch('/api/login-with-username', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  username: callerUser.username || emailToAuth,
+                  password: pw,
+                }),
+              });
+              if (resp.ok) {
+                const json = await resp.json();
+                if (json.success && json.session?.access_token) {
+                  token = json.session.access_token;
+                  try {
+                    await supabase.auth.setSession({
+                      access_token: json.session.access_token,
+                      refresh_token: json.session.refresh_token,
+                    });
+                  } catch (_) {}
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    return token || null;
+  } catch (authCheckErr) {
+    console.warn('Lỗi kiểm tra phiên Supabase Auth:', authCheckErr);
+    return null;
+  }
+}
+
 export const userService = {
   /**
    * Truy vấn danh sách toàn bộ người dùng từ bảng profiles
@@ -181,95 +275,7 @@ export const userService = {
     }
 
     // 3. Kiểm tra và lấy phiên Supabase Auth của Người quản lý (Requirement 2 & 3)
-    let token: string | undefined;
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      let session = sessionData?.session;
-
-      // Xử lý token hết hạn hoặc sắp hết hạn (trong vòng 60s) -> làm mới phiên
-      if (session && session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
-        try {
-          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-          if (!refreshErr && refreshData?.session) {
-            session = refreshData.session;
-          }
-        } catch (_) {}
-      }
-
-      // Nếu chưa có session, thử khôi phục phiên qua refreshSession()
-      if (!session) {
-        try {
-          const { data: refreshData } = await supabase.auth.refreshSession();
-          if (refreshData?.session) {
-            session = refreshData.session;
-          }
-        } catch (_) {}
-      }
-
-      token = session?.access_token;
-
-      // Tự động khôi phục phiên Quản lý nếu người dùng hiện tại là Quản lý nhưng chưa có session
-      if (!token && callerUser) {
-        const callerEmail = (callerUser.email || '').toLowerCase().trim();
-        const isMgr =
-          isSeniorManagerUser(callerUser) ||
-          isSeniorManagerEmail(callerEmail) ||
-          callerUser.role === 'MANAGER' ||
-          callerUser.role === 'ADMIN' ||
-          callerEmail === 'jasminebee279@gmail.com';
-
-        if (isMgr) {
-          const emailToAuth = isSeniorManagerEmail(callerEmail)
-            ? 'buiantra2021@gmail.com'
-            : callerEmail || 'jasminebee279@gmail.com';
-
-          // Thử đăng nhập trực tiếp Supabase Auth bằng tài khoản quản lý đã kích hoạt
-          try {
-            const { data: signData } = await supabase.auth.signInWithPassword({
-              email: emailToAuth,
-              password: 'LabChem@2026!',
-            });
-            if (signData?.session) {
-              session = signData.session;
-              token = session.access_token;
-            }
-          } catch (_) {}
-
-          // Nếu chưa có token, thử gọi /api/login-with-username
-          if (!token) {
-            const fallbackPasswords = ['LabChem@2026!', 'Manager@2026!', 'LabChem@2026'];
-            for (const pw of fallbackPasswords) {
-              try {
-                const resp = await fetch('/api/login-with-username', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    username: callerUser.username || emailToAuth,
-                    password: pw,
-                  }),
-                });
-                if (resp.ok) {
-                  const json = await resp.json();
-                  if (json.success && json.session?.access_token) {
-                    token = json.session.access_token;
-                    try {
-                      await supabase.auth.setSession({
-                        access_token: json.session.access_token,
-                        refresh_token: json.session.refresh_token,
-                      });
-                    } catch (_) {}
-                    break;
-                  }
-                }
-              } catch (_) {}
-            }
-          }
-        }
-      }
-    } catch (authCheckErr) {
-      console.warn('Lỗi kiểm tra phiên Supabase Auth:', authCheckErr);
-    }
+    const token = await getManagerBearerToken(callerUser);
 
     if (!token) {
       return {
@@ -587,11 +593,18 @@ export const userService = {
       };
     }
 
-    // 1. Thử gọi API server an toàn /api/admin-reset-user-password với Bearer token
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (token) {
+    // 1. Gọi API server an toàn /api/admin-reset-user-password với Bearer token
+    if (isSupabaseConfigured()) {
+      const token = await getManagerBearerToken(callerUser);
+      if (!token) {
+        return {
+          success: false,
+          message:
+            'Yêu cầu phiên làm việc của Người quản lý (thiếu Authorization Bearer token). Vui lòng đăng xuất và đăng nhập lại bằng tài khoản Quản lý để cấp quyền.',
+        };
+      }
+
+      try {
         const response = await fetch('/api/admin-reset-user-password', {
           method: 'POST',
           headers: {
@@ -604,18 +617,31 @@ export const userService = {
           }),
         });
 
-        if (response.ok) {
-          const resJson = await response.json();
-          if (resJson.success) {
-            return {
-              success: true,
-              message: resJson.message || `Đã cấp lại mật khẩu thành công cho ${target.name}.`,
-            };
-          }
+        let resJson: any = null;
+        try {
+          resJson = await response.json();
+        } catch (_) {}
+
+        if (response.ok && resJson?.success) {
+          return {
+            success: true,
+            message: resJson.message || `Đã cấp lại mật khẩu thành công cho ${target.name}.`,
+          };
         }
+
+        if (resJson && !resJson.success) {
+          return {
+            success: false,
+            message: resJson.message || 'Lỗi từ máy chủ khi cấp lại mật khẩu.',
+          };
+        }
+      } catch (err: any) {
+        console.warn('Backend API reset password error:', err);
+        return {
+          success: false,
+          message: `Không thể kết nối đến máy chủ quản trị (/api/admin-reset-user-password): ${err?.message || 'Lỗi mạng'}.`,
+        };
       }
-    } catch (err) {
-      console.warn('Backend API reset password notice:', err);
     }
 
     // 2. Cập nhật profile trên database: đặt must_change_password = true (giữ nguyên status)
