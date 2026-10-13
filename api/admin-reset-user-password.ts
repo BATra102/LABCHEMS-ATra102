@@ -42,7 +42,10 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có tối thiểu 6 ký tự.' });
     }
 
-    const clientWithToken = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const clientWithToken = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: authHeader ? { headers: { Authorization: authHeader } } : undefined,
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
     let callerId = '';
     let callerEmail = '';
 
@@ -57,12 +60,6 @@ export default async function handler(req: any, res: any) {
       } catch (_) {}
     }
 
-    const dbClient = SUPABASE_SERVICE_ROLE_KEY
-      ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-          auth: { autoRefreshToken: false, persistSession: false },
-        })
-      : clientWithToken;
-
     if (SUPABASE_SERVICE_ROLE_KEY) {
       const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },
@@ -76,7 +73,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    await dbClient
+    const { error: profErr } = await clientWithToken
       .from('profiles')
       .update({
         must_change_password: true,
@@ -84,9 +81,23 @@ export default async function handler(req: any, res: any) {
       })
       .eq('id', targetUserId);
 
+    if (profErr && SUPABASE_SERVICE_ROLE_KEY) {
+      // Fallback
+      const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      await adminClient
+        .from('profiles')
+        .update({
+          must_change_password: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', targetUserId);
+    }
+
     // Ghi audit log
     try {
-      await dbClient.from('audit_logs').insert({
+      await clientWithToken.from('audit_logs').insert({
         action: 'PASSWORD_RESET',
         entity_type: 'USER',
         entity_id: targetUserId,

@@ -32,16 +32,35 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const dbClient = SUPABASE_SERVICE_ROLE_KEY
-      ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const authHeader = req.headers.authorization;
+    let dbClient = authHeader && authHeader.startsWith('Bearer ')
+      ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: authHeader } },
           auth: { autoRefreshToken: false, persistSession: false },
         })
-      : createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      : (SUPABASE_SERVICE_ROLE_KEY
+          ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+              auth: { autoRefreshToken: false, persistSession: false },
+            })
+          : createClient(SUPABASE_URL, SUPABASE_ANON_KEY));
 
-    const { data, error } = await dbClient
+    let { data, error } = await dbClient
       .from('profiles')
       .select('*')
       .order('created_at', { ascending: false });
+
+    if (error && authHeader && authHeader.startsWith('Bearer ')) {
+      // Fallback
+      const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const resFallback = await anonClient
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!resFallback.error && resFallback.data) {
+        data = resFallback.data;
+        error = null;
+      }
+    }
 
     if (error) {
       return res.status(500).json({ success: false, message: error.message });

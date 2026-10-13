@@ -86,7 +86,8 @@ export default async function handler(req: any, res: any) {
     }
 
     const token = authHeader.split(' ')[1];
-    const verifyClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const clientWithToken = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
@@ -94,7 +95,7 @@ export default async function handler(req: any, res: any) {
     let callerEmail = '';
 
     try {
-      const { data: authData, error: authErr } = await verifyClient.auth.getUser(token);
+      const { data: authData, error: authErr } = await clientWithToken.auth.getUser(token);
       if (authErr || !authData?.user) {
         return res.status(401).json({
           success: false,
@@ -119,7 +120,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Khởi tạo adminClient với service role key (chỉ chạy ở phía server)
+    // Khởi tạo adminClient với service role key (chỉ chạy ở phía server cho Auth Admin API)
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -129,7 +130,7 @@ export default async function handler(req: any, res: any) {
     let callerStatus = 'ACTIVE';
 
     try {
-      const { data: callerProfile } = await adminClient
+      const { data: callerProfile } = await clientWithToken
         .from('profiles')
         .select('role, status, email, google_email')
         .eq('id', callerId)
@@ -178,9 +179,9 @@ export default async function handler(req: any, res: any) {
 
     // 4. Kiểm tra xem username / member_code / email đã tồn tại trong public.profiles chưa
     try {
-      const { data: existingProf } = await adminClient
+      const { data: existingProf } = await clientWithToken
         .from('profiles')
-        .select('id, email, member_code, username')
+        .select('id, email, member_code')
         .or(`email.ilike.${internalEmail},member_code.ilike.${usernameClean}`)
         .maybeSingle();
 
@@ -256,45 +257,61 @@ export default async function handler(req: any, res: any) {
     }
 
     // 6. Lưu hồ sơ người dùng vào bảng public.profiles trên Supabase (Requirement 5, 6, 7)
+    // Chuẩn hóa role và status cho database check constraints
+    const dbRole =
+      requestedRole === 'STAFF' || requestedRole === 'VIEWER'
+        ? 'USER'
+        : requestedRole === 'SENIOR_MANAGER'
+        ? 'MANAGER'
+        : requestedRole;
+
+    const dbStatus =
+      requestedStatus === 'LOCKED'
+        ? 'SUSPENDED'
+        : requestedStatus;
+
     const profilePayload: Record<string, any> = {
       id: newUserId,
       email: internalEmail,
       google_email: internalEmail,
       full_name: trimmedName,
-      role: requestedRole,
-      status: requestedStatus,
+      role: dbRole,
+      status: dbStatus,
       department: requestedDept,
       member_code: usernameClean,
       must_change_password: true,
       updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
     };
 
-    // Thử lưu kèm cột username nếu bảng profiles đã có cột username
+    // Sử dụng clientWithToken (quản lý có Bearer token hợp lệ) để cập nhật hoặc thêm mới
     try {
-      const fullPayload = { ...profilePayload, username: usernameClean };
-      let { error: pErr1 } = await adminClient
+      // Thử cập nhật bản ghi do trigger tự động sinh ra trước
+      const { data: updatedRows, error: updateErr } = await clientWithToken
         .from('profiles')
-        .upsert(fullPayload, { onConflict: 'id' });
+        .update(profilePayload)
+        .eq('id', newUserId)
+        .select();
 
-      if (pErr1 && (pErr1.code === '42703' || pErr1.code === 'PGRST204' || pErr1.message?.includes('username'))) {
-        // Cột username chưa tồn tại trong schema -> lưu bằng profilePayload (dùng member_code)
-        const { error: pErr2 } = await adminClient
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
+        // Nếu chưa có bản ghi, tiến hành upsert
+        const { error: upsertErr } = await clientWithToken
           .from('profiles')
           .upsert(profilePayload, { onConflict: 'id' });
-        if (pErr2) {
-          console.error('Error upserting profile fallback:', pErr2);
-          return res.status(500).json({
-            success: false,
-            message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${pErr2.message}`,
-          });
+
+        if (upsertErr) {
+          // Thử thêm với adminClient nếu có JWT service role key
+          const { error: adminUpsertErr } = await adminClient
+            .from('profiles')
+            .upsert(profilePayload, { onConflict: 'id' });
+
+          if (adminUpsertErr) {
+            console.error('Error saving profile:', upsertErr, adminUpsertErr);
+            return res.status(500).json({
+              success: false,
+              message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${upsertErr.message}`,
+            });
+          }
         }
-      } else if (pErr1) {
-        console.error('Error upserting profile:', pErr1);
-        return res.status(500).json({
-          success: false,
-          message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${pErr1.message}`,
-        });
       }
     } catch (upsertEx: any) {
       console.error('Upsert profile catch:', upsertEx);
@@ -305,12 +322,12 @@ export default async function handler(req: any, res: any) {
     }
 
     // 7. Nếu vai trò là MANAGER, đồng bộ vào system_roles_whitelist
-    if (requestedRole === 'MANAGER') {
+    if (requestedRole === 'MANAGER' || requestedRole === 'SENIOR_MANAGER') {
       try {
-        await adminClient.from('system_roles_whitelist').upsert(
+        await clientWithToken.from('system_roles_whitelist').upsert(
           {
             email: internalEmail,
-            role: 'MANAGER',
+            role: requestedRole === 'SENIOR_MANAGER' ? 'ADMIN' : 'MANAGER',
             notes: `Cấp bởi Quản lý (${callerEmail}) lúc ${new Date().toLocaleString('vi-VN')} cho ${usernameClean}`,
           },
           { onConflict: 'email' }
@@ -320,7 +337,7 @@ export default async function handler(req: any, res: any) {
 
     // 8. Ghi audit_log ACCOUNT_CREATED (TUYỆT ĐỐI KHÔNG LƯU MẬT KHẨU)
     try {
-      await adminClient.from('audit_logs').insert({
+      await clientWithToken.from('audit_logs').insert({
         action: 'ACCOUNT_CREATED',
         entity_type: 'USER',
         entity_id: newUserId,

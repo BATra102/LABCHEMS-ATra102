@@ -70,7 +70,10 @@ async function startServer() {
       }
 
       // 1. Xác thực caller thông qua Bearer token
-      const clientWithToken = createClient(supabaseUrl, supabaseAnonKey);
+      const clientWithToken = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
       const {
         data: { user: callerAuthUser },
         error: authErr,
@@ -598,6 +601,7 @@ async function startServer() {
 
       const token = authHeader.split(' ')[1];
       const clientWithToken = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
         auth: { autoRefreshToken: false, persistSession: false },
       });
 
@@ -643,7 +647,7 @@ async function startServer() {
       let callerStatus = 'ACTIVE';
 
       try {
-        const { data: prof } = await adminClient
+        const { data: prof } = await clientWithToken
           .from('profiles')
           .select('role, status, email, google_email')
           .eq('id', callerId)
@@ -687,9 +691,9 @@ async function startServer() {
 
       // 3. Kiểm tra trùng lặp trong database
       try {
-        const { data: existingUser } = await adminClient
+        const { data: existingUser } = await clientWithToken
           .from('profiles')
-          .select('id, username, member_code, email')
+          .select('id, member_code, email')
           .or(`email.ilike.${internalEmail},member_code.ilike.${usernameClean}`)
           .maybeSingle();
 
@@ -762,38 +766,56 @@ async function startServer() {
       }
 
       // 5. Lưu hồ sơ vào bảng public.profiles trên Supabase (Requirement 5, 6, 7)
+      const dbRole =
+        requestedRole === 'STAFF' || requestedRole === 'VIEWER'
+          ? 'USER'
+          : requestedRole === 'SENIOR_MANAGER'
+          ? 'MANAGER'
+          : requestedRole;
+
+      const dbStatus =
+        requestedStatus === 'LOCKED'
+          ? 'SUSPENDED'
+          : requestedStatus;
+
       const profilePayload: Record<string, any> = {
         id: newUserId,
         member_code: usernameClean,
         email: internalEmail,
         google_email: internalEmail,
         full_name: trimmedName,
-        role: requestedRole,
-        status: requestedStatus,
+        role: dbRole,
+        status: dbStatus,
         department: requestedDept,
         must_change_password: true,
         updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
       };
 
       try {
-        let { error: upsertErr } = await adminClient
+        const { data: updatedRows, error: updateErr } = await clientWithToken
           .from('profiles')
-          .upsert({ ...profilePayload, username: usernameClean }, { onConflict: 'id' });
+          .update(profilePayload)
+          .eq('id', newUserId)
+          .select();
 
-        if (upsertErr && (upsertErr.code === '42703' || upsertErr.code === 'PGRST204' || upsertErr.message?.includes('username'))) {
-          const retryRes = await adminClient
+        if (updateErr || !updatedRows || updatedRows.length === 0) {
+          const { error: upsertErr } = await clientWithToken
             .from('profiles')
             .upsert(profilePayload, { onConflict: 'id' });
-          upsertErr = retryRes.error;
-        }
 
-        if (upsertErr) {
-          console.error('Error saving profile to profiles table:', upsertErr);
-          return res.status(500).json({
-            success: false,
-            message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${upsertErr.message}`,
-          });
+          if (upsertErr) {
+            const { error: adminUpsertErr } = await adminClient
+              .from('profiles')
+              .upsert(profilePayload, { onConflict: 'id' });
+
+            if (adminUpsertErr) {
+              console.error('Error saving profile to profiles table:', upsertErr, adminUpsertErr);
+              return res.status(500).json({
+                success: false,
+                message: `Lỗi khi lưu hồ sơ vào bảng profiles trên Supabase: ${upsertErr.message}`,
+              });
+            }
+          }
         }
       } catch (upsertEx: any) {
         return res.status(500).json({
@@ -803,16 +825,16 @@ async function startServer() {
       }
 
       // Lưu trữ trong serverProfilesStore cache
-      serverProfilesStore.set(newUserId, { ...profilePayload, username: usernameClean });
+      serverProfilesStore.set(newUserId, { ...profilePayload, username: usernameClean, role: requestedRole, status: requestedStatus });
       serverKnownUsernames.add(usernameClean);
 
-      // Nếu vai trò là MANAGER, đồng bộ vào system_roles_whitelist
-      if (requestedRole === 'MANAGER') {
+      // Nếu vai trò là MANAGER hoặc SENIOR_MANAGER, đồng bộ vào system_roles_whitelist
+      if (requestedRole === 'MANAGER' || requestedRole === 'SENIOR_MANAGER') {
         try {
-          await adminClient.from('system_roles_whitelist').upsert(
+          await clientWithToken.from('system_roles_whitelist').upsert(
             {
               email: internalEmail,
-              role: 'MANAGER',
+              role: requestedRole === 'SENIOR_MANAGER' ? 'ADMIN' : 'MANAGER',
               notes: `Cấp bởi Quản lý (${callerEmail}) lúc ${new Date().toLocaleString('vi-VN')} cho user ${usernameClean}`,
             },
             { onConflict: 'email' }
@@ -822,7 +844,7 @@ async function startServer() {
 
       // 6. Ghi nhật ký kiểm toán ACCOUNT_CREATED (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
       try {
-        await adminClient.from('audit_logs').insert({
+        await clientWithToken.from('audit_logs').insert({
           action: 'ACCOUNT_CREATED',
           entity_type: 'USER',
           entity_id: newUserId,
