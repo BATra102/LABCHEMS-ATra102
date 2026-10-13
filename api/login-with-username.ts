@@ -181,8 +181,69 @@ export default async function handler(req: any, res: any) {
             department: 'Bộ môn Dược liệu & Chiết xuất',
           };
 
+      // Tự động tạo/đồng bộ tài khoản Quản lý trên Supabase Auth để cấp phiên làm việc (Session & Bearer Token)
+      if (SUPABASE_SERVICE_ROLE_KEY) {
+        try {
+          const adminAuth = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+
+          const { data: listData } = await adminAuth.auth.admin.listUsers();
+          const existingAuthUser = listData?.users?.find(
+            (u) => u.email?.toLowerCase() === mgrUser.email.toLowerCase()
+          );
+
+          if (!existingAuthUser) {
+            await adminAuth.auth.admin.createUser({
+              id: mgrUser.id,
+              email: mgrUser.email,
+              password,
+              email_confirm: true,
+              user_metadata: {
+                username: mgrUser.username,
+                full_name: mgrUser.name,
+                role: mgrUser.role,
+                department: mgrUser.department,
+              },
+            });
+          } else {
+            await adminAuth.auth.admin.updateUserById(existingAuthUser.id, {
+              password,
+              email_confirm: true,
+            });
+          }
+
+          // Đảm bảo hồ sơ tồn tại trong profiles
+          await adminAuth.from('profiles').upsert(
+            {
+              id: existingAuthUser?.id || mgrUser.id,
+              username: mgrUser.username,
+              member_code: mgrUser.username,
+              full_name: mgrUser.name,
+              email: mgrUser.email,
+              google_email: mgrUser.email,
+              role: mgrUser.role,
+              status: mgrUser.status,
+              department: mgrUser.department,
+            },
+            { onConflict: 'id' }
+          );
+
+          const { data: signInRes } = await client.auth.signInWithPassword({
+            email: mgrUser.email,
+            password,
+          });
+          if (signInRes?.session) {
+            session = signInRes.session;
+          }
+        } catch (syncEx) {
+          console.warn('Sync manager auth session notice:', syncEx);
+        }
+      }
+
       return res.status(200).json({
         success: true,
+        session,
         user: mgrUser,
         message: 'Đăng nhập thành công.',
       });

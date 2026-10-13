@@ -140,32 +140,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
         password === 'admin123' ||
         password === '123456';
 
-      // 1. Nhận diện ngay tài khoản Quản lý đăng nhập bằng mật khẩu cấp lại chuẩn
-      if (isDesignatedManager && isStandardManagerPassword) {
-        const managerUser: User = isSenior
-          ? {
-              id: '4d27e9a8-aae2-4276-adcf-1f10f3458b97',
-              username: 'buiantra',
-              name: 'Bùi Anh Trà (Người quản lý cao cấp)',
-              email: 'buiantra2021@gmail.com',
-              role: 'SENIOR_MANAGER',
-              status: 'ACTIVE',
-              department: 'Ban Quản Trị Hệ Thống',
-            }
-          : {
-              id: 'b3d5175e-a567-412b-9cd1-22249f18ee25',
-              username: 'labmanager',
-              name: 'Người quản lý Lab',
-              email: 'jasminebee279@gmail.com',
-              role: 'MANAGER',
-              status: 'ACTIVE',
-              department: 'Bộ môn Dược liệu & Chiết xuất',
-            };
-
-        await handleLoginSuccess(managerUser, 'MANAGER_AUTHENTICATED');
-        setIsLoading(false);
-        return;
-      }
+      // 1. FLOW ĐĂNG NHẬP CHUẨN: TÊN ĐĂNG NHẬP / EMAIL -> internalAuthEmails
 
       // 2. FLOW ĐĂNG NHẬP CHUẨN: TÊN ĐĂNG NHẬP / EMAIL -> internalAuthEmails
       const cleanUsername = trimmedInput.replace(/@labchem\.(vn|internal|local|com)$/, '').replace(/@.*$/, '');

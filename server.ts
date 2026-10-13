@@ -224,6 +224,11 @@ async function startServer() {
         'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
 
       const client = createClient(supabaseUrl, supabaseAnonKey);
+      const supabaseServiceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SECRET_KEY ||
+        '';
 
       // 1. Xác định email nội bộ tương ứng với username
       const isSeniorManager =
@@ -344,8 +349,68 @@ async function startServer() {
               department: 'Bộ môn Dược liệu & Chiết xuất',
             };
 
+        // Đồng bộ tài khoản Quản lý vào Supabase Auth để cấp phiên làm việc
+        if (supabaseServiceKey) {
+          try {
+            const adminAuth = createClient(supabaseUrl, supabaseServiceKey, {
+              auth: { autoRefreshToken: false, persistSession: false },
+            });
+
+            const { data: listData } = await adminAuth.auth.admin.listUsers();
+            const existingAuth = listData?.users?.find(
+              (u) => u.email?.toLowerCase() === mgrUser.email.toLowerCase()
+            );
+
+            if (!existingAuth) {
+              await adminAuth.auth.admin.createUser({
+                id: mgrUser.id,
+                email: mgrUser.email,
+                password,
+                email_confirm: true,
+                user_metadata: {
+                  username: mgrUser.username,
+                  full_name: mgrUser.name,
+                  role: mgrUser.role,
+                  department: mgrUser.department,
+                },
+              });
+            } else {
+              await adminAuth.auth.admin.updateUserById(existingAuth.id, {
+                password,
+                email_confirm: true,
+              });
+            }
+
+            await adminAuth.from('profiles').upsert(
+              {
+                id: existingAuth?.id || mgrUser.id,
+                username: mgrUser.username,
+                member_code: mgrUser.username,
+                full_name: mgrUser.name,
+                email: mgrUser.email,
+                google_email: mgrUser.email,
+                role: mgrUser.role,
+                status: mgrUser.status,
+                department: mgrUser.department,
+              },
+              { onConflict: 'id' }
+            );
+
+            const { data: signInRes } = await client.auth.signInWithPassword({
+              email: mgrUser.email,
+              password,
+            });
+            if (signInRes?.session) {
+              session = signInRes.session;
+            }
+          } catch (syncErr) {
+            console.warn('Sync manager session error in server.ts:', syncErr);
+          }
+        }
+
         return res.json({
           success: true,
+          session,
           user: mgrUser,
           message: 'Đăng nhập thành công.',
         });
