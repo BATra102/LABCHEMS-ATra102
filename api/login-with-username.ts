@@ -15,7 +15,7 @@ const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_SERVICE_KEY ||
   process.env.SUPABASE_SECRET_KEY ||
-  process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SERVICE_ROLE_KEY ||
   '';
 
 export default async function handler(req: any, res: any) {

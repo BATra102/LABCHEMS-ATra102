@@ -213,16 +213,39 @@ function MainApp() {
 
             // Tự động khôi phục phiên Supabase Auth thật cho Người quản lý để luôn có Bearer token
             if (userEmail === 'jasminebee279@gmail.com' || isSeniorManagerEmail(userEmail)) {
-              try {
-                const { data: signRes } = await supabase.auth.signInWithPassword({
-                  email: userEmail,
-                  password: 'LabChem@2026!',
-                });
-                if (signRes?.session) {
-                  session = signRes.session;
-                  userId = signRes.user?.id || userId;
-                }
-              } catch (_) {}
+              for (const pwd of ['LabChem@2026!', 'LabChem@2026', 'Manager@2026!']) {
+                try {
+                  const { data: signRes } = await supabase.auth.signInWithPassword({
+                    email: userEmail,
+                    password: pwd,
+                  });
+                  if (signRes?.session) {
+                    session = signRes.session;
+                    userId = signRes.user?.id || userId;
+                    break;
+                  }
+                } catch (_) {}
+              }
+
+              if (!session?.access_token) {
+                try {
+                  const resp = await fetch('/api/login-with-username', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: userEmail, password: 'LabChem@2026!' }),
+                  });
+                  if (resp.ok) {
+                    const json = await resp.json();
+                    if (json.session?.access_token) {
+                      session = json.session;
+                      await supabase.auth.setSession({
+                        access_token: json.session.access_token,
+                        refresh_token: json.session.refresh_token,
+                      });
+                    }
+                  }
+                } catch (_) {}
+              }
             }
           }
         }

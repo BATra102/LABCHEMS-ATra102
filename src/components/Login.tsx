@@ -250,6 +250,13 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
                 department: 'Bộ môn Dược liệu & Chiết xuất',
               };
 
+          try {
+            await supabase.auth.signInWithPassword({
+              email: managerUser.email,
+              password,
+            });
+          } catch (_) {}
+
           await handleLoginSuccess(managerUser, 'MANAGER_AUTHENTICATED');
           return;
         }

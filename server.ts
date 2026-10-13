@@ -611,6 +611,7 @@ async function startServer() {
         process.env.SUPABASE_SERVICE_ROLE_KEY ||
         process.env.SUPABASE_SERVICE_KEY ||
         process.env.SUPABASE_SECRET_KEY ||
+        process.env.SERVICE_ROLE_KEY ||
         '';
 
       // 1. Xác thực Caller qua Bearer token (Requirement 4)
