@@ -140,7 +140,7 @@ Mật khẩu tạm thời: ${createdResult.tempPassword || '(Không hiển thị
 Vai trò: ${createdResult.user.role}
 Trạng thái: ${createdResult.user.status}
 Trang đăng nhập: ${loginUrl}
-Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
+Lưu ý: Hãy cung cấp thông tin tài khoản cho thành viên để đăng nhập và làm việc.`;
 
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
@@ -259,7 +259,7 @@ Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
                 <p>
                   • Sau khi đóng cửa sổ, hệ thống sẽ không lưu và không thể xem lại mật khẩu này vì lý do an toàn.
                 </p>
-                <p>• Khuyến nghị: Yêu cầu người dùng đổi mật khẩu sau lần đăng nhập đầu tiên.</p>
+                <p>• Thành viên có thể đăng nhập trực tiếp vào hệ thống ngay sau khi nhận thông tin tài khoản.</p>
               </div>
 
               {/* Nút hành động */}

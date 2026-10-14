@@ -61,7 +61,7 @@ export const rowToUser = (row: any): User => {
     deleted_by: row.deleted_by || undefined,
     deleted_by_name: row.deleted_by_name || undefined,
     deletion_reason: row.deletion_reason || undefined,
-    must_change_password: Boolean(row.must_change_password),
+    must_change_password: false,
   };
 };
 

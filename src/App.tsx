@@ -32,7 +32,6 @@ import { PdfReportModal } from './components/modals/PdfReportModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileMenuDrawer } from './components/modals/MobileMenuDrawer';
 import { Login } from './components/Login';
-import { MustChangePasswordView } from './components/MustChangePasswordView';
 import { Bottle, Chemical, User } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { rowToUser } from './services/authService';
@@ -368,7 +367,6 @@ function MainApp() {
               role: meta.role || 'STAFF',
               status: 'ACTIVE',
               department: meta.department || 'Bộ môn Dược liệu & Chiết xuất',
-              must_change_password: meta.must_change_password !== undefined ? Boolean(meta.must_change_password) : false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
@@ -663,25 +661,7 @@ function MainApp() {
     );
   }
 
-  // 3. Nếu tài khoản có cờ bắt buộc đổi mật khẩu lần đầu (must_change_password = true)
-  // Ngay lập tức chuyển tới màn hình Đổi mật khẩu, không cho truy cập Dashboard và các chức năng dữ liệu
-  if (currentUser?.must_change_password) {
-    return (
-      <MustChangePasswordView
-        onPasswordChanged={async () => {
-          if (currentUser) {
-            setCurrentUser({
-              ...currentUser,
-              must_change_password: false,
-            });
-          }
-          await refreshFromSupabase();
-        }}
-      />
-    );
-  }
-
-  // 4. Khi ĐÃ XÁC THỰC: Hiển thị giao diện hệ thống LabChem
+  // 3. Khi ĐÃ XÁC THỰC: Hiển thị giao diện hệ thống LabChem (Dashboard và các tab chính)
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       {/* Top Navigation */}

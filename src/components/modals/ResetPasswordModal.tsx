@@ -141,7 +141,7 @@ Email đăng nhập: ${user.email}
 Mật khẩu mới: ${newPassword}
 Trang đăng nhập: ${loginUrl}
 ------------------------------------
-Lưu ý: Mật khẩu này là tạm thời. Bạn bắt buộc phải đổi sang mật khẩu riêng ở lần đăng nhập đầu tiên.`;
+Lưu ý: Hãy cung cấp thông tin đăng nhập này cho thành viên để truy cập hệ thống.`;
 
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -236,7 +236,7 @@ Lưu ý: Mật khẩu này là tạm thời. Bạn bắt buộc phải đổi sa
                 </div>
                 <p>• Mật khẩu này chỉ hiển thị <strong>MỘT LẦN DUY NHẤT</strong> trong modal kết quả này để Người quản lý sao chép.</p>
                 <p>• Sau khi đóng modal, không thể xem lại mật khẩu đó.</p>
-                <p>• Khi người dùng đăng nhập bằng mật khẩu này, hệ thống sẽ <strong>bắt buộc đổi mật khẩu lần đầu</strong> trước khi vào Dashboard.</p>
+                <p>• Người dùng có thể đăng nhập trực tiếp vào hệ thống bằng mật khẩu này.</p>
               </div>
 
               {/* Nút hành động */}

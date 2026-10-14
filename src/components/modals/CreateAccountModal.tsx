@@ -187,7 +187,7 @@ Bộ môn / Phòng ban: ${createdResult.user.department}
 Vai trò: ${createdResult.user.role}
 Trạng thái: ${createdResult.user.status}
 Trang đăng nhập: ${loginUrl}
-Lưu ý: Vui lòng đổi mật khẩu sau lần đăng nhập đầu tiên.`;
+Lưu ý: Hãy cung cấp thông tin tài khoản cho thành viên để đăng nhập và làm việc.`;
 
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);

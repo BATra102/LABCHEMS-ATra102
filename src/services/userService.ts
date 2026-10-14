@@ -253,7 +253,7 @@ export const userService = {
         status: params.status || 'ACTIVE',
         department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
         dateJoined: new Date().toISOString().split('T')[0],
-        must_change_password: true,
+        must_change_password: false,
       };
 
       await auditService.log({
@@ -645,18 +645,18 @@ export const userService = {
       }
     }
 
-    // 2. Cập nhật profile trên database: đặt must_change_password = true (giữ nguyên status)
+    // 2. Cập nhật profile trên database (giữ nguyên status)
     if (isSupabaseConfigured()) {
       try {
         await supabase
           .from('profiles')
           .update({
-            must_change_password: true,
+            must_change_password: false,
             updated_at: new Date().toISOString(),
           })
           .eq('id', id);
       } catch (e) {
-        console.warn('Update must_change_password notice:', e);
+        console.warn('Update password notice:', e);
       }
     }
 
@@ -665,10 +665,10 @@ export const userService = {
       action: 'PASSWORD_RESET',
       entityType: 'USER',
       entityId: id,
-      description: `Người quản lý đã cấp lại mật khẩu cho tài khoản: ${target.name} (${target.email}). Yêu cầu đổi mật khẩu ở lần đăng nhập tiếp theo.`,
+      description: `Người quản lý đã cấp lại mật khẩu cho tài khoản: ${target.name} (${target.email}).`,
       actorId: callerUser?.id,
       actorName: callerUser?.name || 'Quản lý',
-      newData: { targetId: id, email: target.email, must_change_password: true, resetAt: new Date().toISOString() },
+      newData: { targetId: id, email: target.email, resetAt: new Date().toISOString() },
     });
 
     return {
