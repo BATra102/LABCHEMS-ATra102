@@ -7,8 +7,8 @@ import {
   HybridBinarizer,
 } from '@zxing/library';
 import { useLab } from '../../context/LabContext';
-import { Bottle, Chemical } from '../../types';
-import { parseScannedQrDetails, getBottleQrId } from '../../utils/qrCode';
+import { Bottle, Chemical, ChemicalCategory, ChemicalGrade, ChemicalUnit, StorageLocation } from '../../types';
+import { parseScannedQrDetails, getBottleQrId, ParsedQrResult } from '../../utils/qrCode';
 import { getBottleStatusLabel, getDaysRemaining, calculateBottleStatus } from '../../utils/status';
 import { convertUnit } from '../../utils/units';
 import { bottleService } from '../../services/bottleService';
@@ -27,8 +27,6 @@ import {
   PackagePlus,
   MapPin,
   Calendar,
-  AlertTriangle,
-  History,
   ShieldAlert,
   SlidersHorizontal,
   Plus,
@@ -39,8 +37,9 @@ import {
   Barcode,
   Sparkles,
   Info,
-  Clock,
-  RotateCcw,
+  History,
+  Layers,
+  ArrowRight,
   ExternalLink,
 } from 'lucide-react';
 
@@ -50,10 +49,10 @@ interface Props {
   onBottleIdentified: (bottle: Bottle) => void;
   onOpenRecordUsage?: (chemicalId: string, bottleId?: string) => void;
   onOpenStockIn?: (chemicalId?: string, preselectedBottleCode?: string) => void;
-  onOpenAddChemical?: () => void;
+  onOpenAddChemical?: (prefilledCode?: string, prefilledData?: any) => void;
 }
 
-type ModalView = 'SCANNING' | 'BOTTLE_DETAIL' | 'NOT_FOUND';
+type ModalView = 'SCANNING' | 'BOTTLE_DETAIL' | 'CHEMICAL_DETAIL' | 'NOT_FOUND';
 
 export const QrScannerModal: React.FC<Props> = ({
   isOpen,
@@ -68,18 +67,22 @@ export const QrScannerModal: React.FC<Props> = ({
     chemicals,
     currentUser,
     isManager,
+    stockIn,
+    addChemical,
     recordUsage,
     createStockAdjustment,
     logQrScan,
     referenceDate,
     transactions,
     createApprovalRequest,
+    storageCabinets,
   } = useLab();
 
-  // Core references
+  // Core video & canvas references
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraCaptureInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const zxingReaderRef = useRef<MultiFormatReader | null>(null);
@@ -100,15 +103,16 @@ export const QrScannerModal: React.FC<Props> = ({
   // Scanning & Detection states
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [scannedCode, setScannedCode] = useState<string>('');
+  const [parsedQrInfo, setParsedQrInfo] = useState<ParsedQrResult | null>(null);
   const [matchedBottle, setMatchedBottle] = useState<Bottle | null>(null);
   const [matchedChemical, setMatchedChemical] = useState<Chemical | null>(null);
 
-  // Collapsible manual entry fallback
+  // Collapsible manual entry fallback in SCANNING view
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [manualCodeInput, setManualCodeInput] = useState<string>('');
 
   // Quick Action form toggles inside BOTTLE_DETAIL
-  const [activeActionTab, setActiveActionTab] = useState<'NONE' | 'USAGE' | 'ADJUST' | 'HISTORY'>('NONE');
+  const [activeActionTab, setActiveActionTab] = useState<'NONE' | 'USAGE' | 'STOCK_IN' | 'ADJUST' | 'HISTORY'>('NONE');
 
   // Inline Quick Usage form states
   const [useQuantity, setUseQuantity] = useState<string>('50');
@@ -119,6 +123,17 @@ export const QrScannerModal: React.FC<Props> = ({
   const [usageSuccess, setUsageSuccess] = useState<string | null>(null);
   const [isSubmittingUsage, setIsSubmittingUsage] = useState<boolean>(false);
 
+  // Inline Quick Stock In form states (inside BOTTLE_DETAIL)
+  const [stockInMode, setStockInMode] = useState<'EXISTING_BOTTLE' | 'NEW_BOTTLE'>('EXISTING_BOTTLE');
+  const [stockInQuantity, setStockInQuantity] = useState<string>('500');
+  const [stockInLot, setStockInLot] = useState<string>('');
+  const [stockInExpiry, setStockInExpiry] = useState<string>('2028-10-01');
+  const [stockInCabinet, setStockInCabinet] = useState<string>('Cabinet C1');
+  const [stockInShelf, setStockInShelf] = useState<string>('Shelf 1');
+  const [stockInError, setStockInError] = useState<string | null>(null);
+  const [stockInSuccess, setStockInSuccess] = useState<string | null>(null);
+  const [isSubmittingStockIn, setIsSubmittingStockIn] = useState<boolean>(false);
+
   // Inline Quick Stock Adjust form states (Manager only)
   const [adjustQuantity, setAdjustQuantity] = useState<string>('');
   const [adjustReason, setAdjustReason] = useState<string>('Đối soát kiểm kê thực tế định kỳ');
@@ -126,6 +141,34 @@ export const QrScannerModal: React.FC<Props> = ({
   const [adjustError, setAdjustError] = useState<string | null>(null);
   const [adjustSuccess, setAdjustSuccess] = useState<string | null>(null);
   const [isSubmittingAdjust, setIsSubmittingAdjust] = useState<boolean>(false);
+
+  // NOT_FOUND state: 2 tabs for immediate resolution
+  const [notFoundTab, setNotFoundTab] = useState<'ADD_BOTTLE_EXISTING_CHEM' | 'CREATE_NEW_CHEM'>('ADD_BOTTLE_EXISTING_CHEM');
+  const [selectedChemIdForNewBottle, setSelectedChemIdForNewBottle] = useState<string>('');
+  const [newBottleCodeInput, setNewBottleCodeInput] = useState<string>('');
+  const [newBottleQtyInput, setNewBottleQtyInput] = useState<string>('500');
+  const [newBottleUnitInput, setNewBottleUnitInput] = useState<ChemicalUnit>('mL');
+  const [newBottleLotInput, setNewBottleLotInput] = useState<string>('');
+  const [newBottleExpiryInput, setNewBottleExpiryInput] = useState<string>('2028-10-01');
+  const [newBottleCabinetInput, setNewBottleCabinetInput] = useState<string>('Cabinet C1');
+  const [newBottleShelfInput, setNewBottleShelfInput] = useState<string>('Shelf 1');
+
+  // NOT_FOUND -> CREATE_NEW_CHEM fields
+  const [newChemName, setNewChemName] = useState<string>('');
+  const [newChemCode, setNewChemCode] = useState<string>('');
+  const [newChemCas, setNewChemCas] = useState<string>('');
+  const [newChemCategory, setNewChemCategory] = useState<ChemicalCategory>('Solvents');
+  const [newChemGrade, setNewChemGrade] = useState<ChemicalGrade>('AR');
+  const [newChemUnit, setNewChemUnit] = useState<ChemicalUnit>('mL');
+  const [newChemBottleQty, setNewChemBottleQty] = useState<string>('500');
+  const [newChemLot, setNewChemLot] = useState<string>('');
+  const [newChemExpiry, setNewChemExpiry] = useState<string>('2028-10-01');
+  const [notFoundError, setNotFoundError] = useState<string | null>(null);
+  const [notFoundSuccess, setNotFoundSuccess] = useState<string | null>(null);
+  const [isSubmittingNotFound, setIsSubmittingNotFound] = useState<boolean>(false);
+
+  // Filter active chemicals
+  const activeChemicals = chemicals.filter((c) => c.status !== 'ARCHIVED');
 
   // Initialize BarcodeDetector and ZXing readers
   useEffect(() => {
@@ -167,7 +210,6 @@ export const QrScannerModal: React.FC<Props> = ({
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
 
-        // Warehouse scanner dual-frequency crisp chirp
         osc.type = 'sine';
         osc.frequency.setValueAtTime(1200, ctx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.08);
@@ -194,7 +236,7 @@ export const QrScannerModal: React.FC<Props> = ({
     }
   }, []);
 
-  // Camera Management
+  // Camera Management - Fully optimized for iOS Safari, iPadOS, Android & Desktop Webcams
   const stopCamera = useCallback(() => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
@@ -218,40 +260,80 @@ export const QrScannerModal: React.FC<Props> = ({
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError('Trình duyệt không hỗ trợ truy cập máy ảnh trực tiếp.');
+      setCameraError('Trình duyệt của bạn không hỗ trợ camera trực tiếp. Vui lòng sử dụng tính năng tải ảnh hoặc nhập mã dự phòng.');
       return;
     }
 
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: {
-          facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      };
+      let stream: MediaStream;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Tier 1: Try environment camera with ideal resolution
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
+        });
+      } catch (err1) {
+        // Tier 2: Try facingMode string directly (Android / iOS fallback)
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode },
+          });
+        } catch (err2) {
+          // Tier 3: Fallback to generic video constraint (e.g. laptop webcam, strict iOS Safari)
+          console.warn('Ideal camera constraints fallback to generic video:', err2);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        }
+      }
+
       streamRef.current = stream;
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+        const video = videoRef.current;
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('muted', 'true');
+        video.playsInline = true;
+        (video as any).webkitPlaysInline = true;
+        video.muted = true;
+        video.autoplay = true;
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn('Video play interrupted:', playErr);
+        }
+
         setCameraActive(true);
 
         const track = stream.getVideoTracks()[0];
         const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
         setHasTorch(!!capabilities.torch);
+
+        // Try continuous auto-focus if supported on Android/iOS
+        if (capabilities.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+          try {
+            await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] });
+          } catch (_) {}
+        }
       }
     } catch (err: any) {
       console.warn('Camera access notice:', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setPermissionDenied(true);
-        setCameraError('Bạn chưa cấp quyền máy ảnh trong trình duyệt. Vui lòng nhấn "Cho phép camera" bên dưới để quét mã.');
+        setCameraError('Bạn chưa cấp quyền camera trong trình duyệt. Vui lòng bấm "Cho phép camera / Thử lại" bên dưới.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setCameraError('Không tìm thấy thiết bị camera trên thiết bị này.');
+        setCameraError('Không tìm thấy thiết bị camera trên máy này. Bạn có thể tải ảnh mã hoặc nhập mã thủ công.');
       } else {
         setCameraError('Không thể khởi động camera. Vui lòng tải ảnh mã hoặc nhập mã dự phòng.');
       }
@@ -285,13 +367,21 @@ export const QrScannerModal: React.FC<Props> = ({
       setCurrentView('SCANNING');
       setIsSearching(false);
       setScannedCode('');
+      setParsedQrInfo(null);
       setMatchedBottle(null);
       setMatchedChemical(null);
       setActiveActionTab('NONE');
       setUsageError(null);
       setUsageSuccess(null);
+      setStockInError(null);
+      setStockInSuccess(null);
       setAdjustError(null);
       setAdjustSuccess(null);
+      setNotFoundError(null);
+      setNotFoundSuccess(null);
+      if (activeChemicals.length > 0) {
+        setSelectedChemIdForNewBottle(activeChemicals[0].id);
+      }
       startCamera();
     } else {
       isLockedRef.current = true;
@@ -308,21 +398,48 @@ export const QrScannerModal: React.FC<Props> = ({
       const trimmed = rawCode.trim();
       if (!trimmed) return;
 
-      // Extract & normalize code (e.g. LABCHEM:BOTTLE:HEX-001 -> HEX-001)
+      // Extract & normalize code and rich metadata (JSON / standard prefixes)
       const parsed = parseScannedQrDetails(trimmed);
       const cleanIdent = (parsed.identifier || trimmed)
         .replace(/^(LABCHEM:BOTTLE:|LABCHEM:CHEMICAL:|BOTTLE:|CHEM:)/i, '')
         .trim();
 
       setScannedCode(cleanIdent);
+      setParsedQrInfo(parsed);
       setIsSearching(true);
+
+      // Pre-fill form fields for NOT_FOUND fallback if QR contains JSON info
+      setNewBottleCodeInput(cleanIdent);
+      setNewChemCode(cleanIdent);
+      if (parsed.name) setNewChemName(parsed.name);
+      if (parsed.casNumber) setNewChemCas(parsed.casNumber);
+      if (parsed.lotNumber) {
+        setNewBottleLotInput(parsed.lotNumber);
+        setNewChemLot(parsed.lotNumber);
+        setStockInLot(parsed.lotNumber);
+      }
+      if (parsed.volume) {
+        setNewBottleQtyInput(String(parsed.volume));
+        setNewChemBottleQty(String(parsed.volume));
+        setStockInQuantity(String(parsed.volume));
+      }
+      if (parsed.unit) {
+        setNewBottleUnitInput(parsed.unit);
+        setNewChemUnit(parsed.unit);
+      }
+      if (parsed.expiryDate) {
+        setNewBottleExpiryInput(parsed.expiryDate);
+        setNewChemExpiry(parsed.expiryDate);
+        setStockInExpiry(parsed.expiryDate);
+      }
 
       // Play instant beep & vibrate
       playScanFeedback();
 
       try {
-        // 1. Check local memory bottles first (instantaneous <10ms match)
         const targetLower = cleanIdent.toLowerCase();
+
+        // 1. Check local memory bottles first (instantaneous <10ms match)
         let targetBottle = bottles.find(
           (b) =>
             b.bottleCode.toLowerCase() === targetLower ||
@@ -336,7 +453,7 @@ export const QrScannerModal: React.FC<Props> = ({
 
         let targetChem: Chemical | null = null;
 
-        // 2. If not found in local memory or for live Supabase accuracy: query Supabase directly
+        // 2. If not found in local memory: query Supabase directly
         if (!targetBottle) {
           const { data: dbBottle } = await bottleService.findByQrOrCode(cleanIdent);
           if (dbBottle) {
@@ -344,7 +461,7 @@ export const QrScannerModal: React.FC<Props> = ({
           }
         }
 
-        // 3. If Bottle Found -> Retrieve chemical record
+        // 3. If Bottle Found -> Retrieve parent chemical record
         if (targetBottle) {
           targetChem = chemicals.find((c) => c.id === targetBottle?.chemicalId) || null;
 
@@ -359,6 +476,9 @@ export const QrScannerModal: React.FC<Props> = ({
           setMatchedBottle(targetBottle);
           setMatchedChemical(targetChem);
           setAdjustQuantity(String(targetBottle.currentVolume));
+          setStockInQuantity(String(targetBottle.initialVolume || 500));
+          setStockInLot(targetBottle.lotNumber || `LOT-${new Date().getFullYear()}-001`);
+          setStockInExpiry(targetBottle.expiryDate);
 
           // Log scan in database & history
           logQrScan({
@@ -370,25 +490,27 @@ export const QrScannerModal: React.FC<Props> = ({
             actionTaken: 'VIEW',
           });
 
-          // Small 250ms HUD transition for smooth warehouse scanner feel
           setTimeout(() => {
             setIsSearching(false);
             setCurrentView('BOTTLE_DETAIL');
             stopCamera();
-          }, 250);
+          }, 200);
 
           return;
         }
 
-        // 4. Check if code matches Chemical / Catalog Number / Barcode (Cách 1)
+        // 4. Check if code matches Master Chemical / Catalog Number / CAS / Barcode
         const chemMatch = chemicals.find(
           (c) =>
             c.code.toLowerCase() === targetLower ||
             c.id.toLowerCase() === targetLower ||
             c.casNumber.toLowerCase() === targetLower ||
             (c.catalogNumber && c.catalogNumber.toLowerCase() === targetLower) ||
+            (c.barcode && c.barcode.toLowerCase() === targetLower) ||
             c.name.toLowerCase() === targetLower ||
-            c.englishName.toLowerCase() === targetLower
+            c.englishName.toLowerCase() === targetLower ||
+            (parsed.casNumber && c.casNumber.toLowerCase() === parsed.casNumber.toLowerCase()) ||
+            (parsed.name && c.name.toLowerCase() === parsed.name.toLowerCase())
         );
 
         if (chemMatch) {
@@ -399,43 +521,58 @@ export const QrScannerModal: React.FC<Props> = ({
 
           setMatchedChemical(chemMatch);
           setMatchedBottle(firstBottle);
+          setSelectedChemIdForNewBottle(chemMatch.id);
+
           if (firstBottle) {
             setAdjustQuantity(String(firstBottle.currentVolume));
+            setStockInQuantity(String(firstBottle.initialVolume || 500));
+            setStockInLot(firstBottle.lotNumber || `LOT-${new Date().getFullYear()}-001`);
+            setStockInExpiry(firstBottle.expiryDate);
+
+            logQrScan({
+              qrId: cleanIdent,
+              bottleId: firstBottle.id,
+              bottleCode: firstBottle.bottleCode,
+              chemicalId: chemMatch.id,
+              chemicalName: chemMatch.name,
+              actionTaken: 'VIEW',
+            });
+
+            setTimeout(() => {
+              setIsSearching(false);
+              setCurrentView('BOTTLE_DETAIL');
+              stopCamera();
+            }, 200);
+            return;
+          } else {
+            // Chemical exists in catalog but has 0 bottles in warehouse
+            setTimeout(() => {
+              setIsSearching(false);
+              setCurrentView('CHEMICAL_DETAIL');
+              stopCamera();
+            }, 200);
+            return;
           }
-
-          logQrScan({
-            qrId: cleanIdent,
-            bottleId: firstBottle?.id,
-            bottleCode: firstBottle?.bottleCode || chemMatch.code,
-            chemicalId: chemMatch.id,
-            chemicalName: chemMatch.name,
-            actionTaken: 'VIEW',
-          });
-
-          setTimeout(() => {
-            setIsSearching(false);
-            setCurrentView('BOTTLE_DETAIL');
-            stopCamera();
-          }, 250);
-          return;
         }
 
-        // 5. Bottle & Chemical NOT Found in Database -> Requirement 4
+        // 5. Bottle & Chemical NOT Found -> Show NOT_FOUND resolution screen
         setTimeout(() => {
           setIsSearching(false);
           setMatchedBottle(null);
           setMatchedChemical(null);
+          setSelectedChemIdForNewBottle((prev) => prev || activeChemicals[0]?.id || chemicals[0]?.id || '');
           setCurrentView('NOT_FOUND');
           stopCamera();
-        }, 250);
+        }, 200);
       } catch (err) {
-        console.error('Error resolving bottle code:', err);
+        console.error('Error resolving scanned code:', err);
         setIsSearching(false);
+        setSelectedChemIdForNewBottle((prev) => prev || activeChemicals[0]?.id || chemicals[0]?.id || '');
         setCurrentView('NOT_FOUND');
         stopCamera();
       }
     },
-    [bottles, chemicals, logQrScan, playScanFeedback, stopCamera]
+    [bottles, chemicals, activeChemicals, logQrScan, playScanFeedback, stopCamera]
   );
 
   // Handler triggered when a code is identified in video frame
@@ -448,7 +585,7 @@ export const QrScannerModal: React.FC<Props> = ({
     [resolveScannedCode]
   );
 
-  // Continuous Camera Scanning Loop (QR + 1D Barcode)
+  // Continuous Camera Scanning Loop with scaled canvas for 60 FPS mobile performance
   useEffect(() => {
     if (!cameraActive || !videoRef.current || !canvasRef.current || currentView !== 'SCANNING') {
       return;
@@ -462,14 +599,34 @@ export const QrScannerModal: React.FC<Props> = ({
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+      if (
+        video &&
+        video.readyState >= 2 &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0 &&
+        canvas
+      ) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          // Downsample to max 640px to ensure jsQR executes in <8ms on mobile CPUs
+          const maxDim = 640;
+          let w = video.videoWidth;
+          let h = video.videoHeight;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
 
-          // Tier 1: Hardware-Accelerated BarcodeDetector (QR & 1D Barcodes: Code 128, Code 39, EAN, UPC)
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(video, 0, 0, w, h);
+
+          // Tier 1: Hardware-Accelerated BarcodeDetector (Chrome Android & Modern Browsers)
           if (barcodeDetectorRef.current) {
             try {
               const barcodes = await barcodeDetectorRef.current.detect(video);
@@ -482,9 +639,9 @@ export const QrScannerModal: React.FC<Props> = ({
             }
           }
 
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, w, h);
 
-          // Tier 2: jsQR (Fastest JavaScript QR Decoder)
+          // Tier 2: jsQR (Fastest JavaScript QR Decoder on scaled image)
           try {
             const qrResult = jsQR(imageData.data, imageData.width, imageData.height, {
               inversionAttempts: 'attemptBoth',
@@ -537,13 +694,18 @@ export const QrScannerModal: React.FC<Props> = ({
   const handleRescan = () => {
     isLockedRef.current = false;
     setScannedCode('');
+    setParsedQrInfo(null);
     setMatchedBottle(null);
     setMatchedChemical(null);
     setActiveActionTab('NONE');
     setUsageError(null);
     setUsageSuccess(null);
+    setStockInError(null);
+    setStockInSuccess(null);
     setAdjustError(null);
     setAdjustSuccess(null);
+    setNotFoundError(null);
+    setNotFoundSuccess(null);
     setCurrentView('SCANNING');
     startCamera();
   };
@@ -613,7 +775,9 @@ export const QrScannerModal: React.FC<Props> = ({
     handleCodeDetected(manualCodeInput.trim());
   };
 
-  // Execute Quick Usage directly from card
+  // =========================================================================
+  // ACTION: Execute Quick Usage (Xuất kho / Ghi sử dụng)
+  // =========================================================================
   const handleExecuteQuickUsage = async () => {
     if (!matchedBottle || !matchedChemical) return;
     setUsageError(null);
@@ -632,14 +796,12 @@ export const QrScannerModal: React.FC<Props> = ({
       return;
     }
 
-    // Check permissions
     const canUse = isManager || currentUser.permissions?.recordUsage !== false;
     if (!canUse) {
       setUsageError('Bạn chưa được cấp quyền ghi sử dụng hóa chất.');
       return;
     }
 
-    // Limit checks
     if (!isManager && currentUser.limits?.maxUsagePerTransaction) {
       const inMl = convertUnit(qty, matchedBottle.unit, 'mL') ?? qty;
       if (inMl > currentUser.limits.maxUsagePerTransaction) {
@@ -666,7 +828,7 @@ export const QrScannerModal: React.FC<Props> = ({
 
     setIsSubmittingUsage(true);
     try {
-      await recordUsage({
+      const res = await recordUsage({
         chemicalId: matchedBottle.chemicalId,
         bottleId: matchedBottle.id,
         quantity: qty,
@@ -677,7 +839,12 @@ export const QrScannerModal: React.FC<Props> = ({
         notes: useNotes ? `[Quét QR Thao Tác Nhanh] ${useNotes}` : '[Quét QR Thao Tác Nhanh]',
       });
 
-      const updatedRemaining = Math.max(0, matchedBottle.currentVolume - qty);
+      if (!res.success) {
+        setUsageError(res.message);
+        return;
+      }
+
+      const updatedRemaining = Math.max(0, Math.round((matchedBottle.currentVolume - qty) * 10000) / 10000);
       setMatchedBottle({
         ...matchedBottle,
         currentVolume: updatedRemaining,
@@ -699,7 +866,9 @@ export const QrScannerModal: React.FC<Props> = ({
     }
   };
 
-  // Execute Quick Use Full Bottle (Cách 1: Trừ trọn 1 chai)
+  // =========================================================================
+  // ACTION: Execute Quick Use Full Bottle (1-chạm Dùng hết 1 chai)
+  // =========================================================================
   const handleExecuteQuickUseFullBottle = async () => {
     if (!matchedChemical) return;
     setUsageError(null);
@@ -707,13 +876,13 @@ export const QrScannerModal: React.FC<Props> = ({
     setIsSubmittingUsage(true);
 
     try {
-      const res = recordUsage({
+      const res = await recordUsage({
         chemicalId: matchedChemical.id,
         bottleId: matchedBottle?.id,
         useFullBottle: true,
         date: new Date().toISOString().split('T')[0],
         purpose: 'Dùng hết 1 chai',
-        notes: '[Cách 1] Dùng hết 1 chai',
+        notes: '[Quét QR] Dùng hết 1 chai',
         source: 'QR_SCAN',
       });
 
@@ -734,13 +903,76 @@ export const QrScannerModal: React.FC<Props> = ({
         }, 2500);
       }
     } catch (err: any) {
-      setUsageError(err.message || 'Lỗi khi ghi nhận dùng hết chai');
+      setUsageError(err.message || 'Lỗi khi ghi nhận dùng hết chai.');
     } finally {
       setIsSubmittingUsage(false);
     }
   };
 
-  // Execute Quick Stock Adjust (Manager only)
+  // =========================================================================
+  // ACTION: Execute Quick Stock In Directly from Scanner Card (Nhập kho thêm)
+  // =========================================================================
+  const handleExecuteQuickStockIn = async () => {
+    if (!matchedChemical) return;
+    setStockInError(null);
+    setStockInSuccess(null);
+
+    const qty = parseFloat(stockInQuantity);
+    if (isNaN(qty) || qty <= 0) {
+      setStockInError('Số lượng nhập kho phải lớn hơn 0.');
+      return;
+    }
+
+    setIsSubmittingStockIn(true);
+    try {
+      const res = await stockIn({
+        chemicalId: matchedChemical.id,
+        bottleCode: stockInMode === 'NEW_BOTTLE' ? undefined : matchedBottle?.bottleCode,
+        existingBottleId: stockInMode === 'EXISTING_BOTTLE' && matchedBottle ? matchedBottle.id : undefined,
+        quantity: qty,
+        unit: matchedBottle?.unit || matchedChemical.primaryUnit,
+        lotNumber: stockInLot.trim() || `LOT-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`,
+        expiryDate: stockInExpiry || '2028-10-01',
+        storageLocation: {
+          building: matchedBottle?.location.building || 'Building A',
+          room: matchedBottle?.location.room || 'Room 302',
+          cabinet: stockInCabinet || matchedBottle?.location.cabinet || 'Cabinet C1',
+          shelf: stockInShelf || matchedBottle?.location.shelf || 'Shelf 1',
+        },
+        notes: `[Quét QR Nhập Kho] ${stockInMode === 'EXISTING_BOTTLE' ? 'Cộng thêm tồn' : 'Tạo thêm chai mới'}`,
+      });
+
+      if (!res.success) {
+        setStockInError(res.message);
+        return;
+      }
+
+      setStockInSuccess(res.message);
+
+      if (res.bottle) {
+        setMatchedBottle(res.bottle);
+      } else if (stockInMode === 'EXISTING_BOTTLE' && matchedBottle) {
+        setMatchedBottle({
+          ...matchedBottle,
+          currentVolume: matchedBottle.currentVolume + qty,
+          status: 'IN_USE',
+        });
+      }
+
+      setTimeout(() => {
+        setActiveActionTab('NONE');
+        setStockInSuccess(null);
+      }, 2500);
+    } catch (err: any) {
+      setStockInError(err.message || 'Lỗi khi nhập kho vào Supabase.');
+    } finally {
+      setIsSubmittingStockIn(false);
+    }
+  };
+
+  // =========================================================================
+  // ACTION: Execute Quick Stock Adjust (Manager only)
+  // =========================================================================
   const handleExecuteQuickAdjust = async () => {
     if (!matchedBottle || !isManager) return;
     setAdjustError(null);
@@ -784,6 +1016,153 @@ export const QrScannerModal: React.FC<Props> = ({
     }
   };
 
+  // =========================================================================
+  // ACTION: NOT_FOUND Tab 1 -> Add New Bottle to Existing Chemical
+  // =========================================================================
+  const handleNotFoundAddBottleToExisting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNotFoundError(null);
+    setNotFoundSuccess(null);
+
+    const targetChemId = selectedChemIdForNewBottle || activeChemicals[0]?.id || chemicals[0]?.id;
+    if (!targetChemId) {
+      setNotFoundError('Vui lòng chọn hóa chất từ danh mục.');
+      return;
+    }
+
+    const qty = parseFloat(newBottleQtyInput);
+    if (isNaN(qty) || qty <= 0) {
+      setNotFoundError('Số lượng dung tích phải lớn hơn 0.');
+      return;
+    }
+
+    setIsSubmittingNotFound(true);
+    try {
+      const res = await stockIn({
+        chemicalId: targetChemId,
+        bottleCode: newBottleCodeInput.trim() || undefined,
+        qrCode: scannedCode.trim() || undefined,
+        quantity: qty,
+        unit: newBottleUnitInput,
+        lotNumber: newBottleLotInput.trim() || `LOT-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`,
+        expiryDate: newBottleExpiryInput || '2028-10-01',
+        storageLocation: {
+          building: 'Building A',
+          room: 'Room 302',
+          cabinet: newBottleCabinetInput || 'Cabinet C1',
+          shelf: newBottleShelfInput || 'Shelf 1',
+        },
+        notes: `Tạo chai từ quét mã QR [${scannedCode}]`,
+      });
+
+      if (!res.success) {
+        setNotFoundError(res.message);
+        return;
+      }
+
+      setNotFoundSuccess(res.message);
+
+      const targetChem = chemicals.find((c) => c.id === selectedChemIdForNewBottle) || null;
+      setMatchedChemical(targetChem);
+      if (res.bottle) {
+        setMatchedBottle(res.bottle);
+      }
+
+      setTimeout(() => {
+        setNotFoundSuccess(null);
+        setCurrentView('BOTTLE_DETAIL');
+      }, 1200);
+    } catch (err: any) {
+      setNotFoundError(err.message || 'Lỗi khi lưu chai vào Supabase.');
+    } finally {
+      setIsSubmittingNotFound(false);
+    }
+  };
+
+  // =========================================================================
+  // ACTION: NOT_FOUND Tab 2 -> Create Master Chemical & Initial Bottle
+  // =========================================================================
+  const handleNotFoundCreateNewChemical = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNotFoundError(null);
+    setNotFoundSuccess(null);
+
+    const name = newChemName.trim();
+    if (!name) {
+      setNotFoundError('Vui lòng nhập tên hóa chất.');
+      return;
+    }
+
+    const qty = parseFloat(newChemBottleQty);
+    if (isNaN(qty) || qty <= 0) {
+      setNotFoundError('Dung tích chai ban đầu phải lớn hơn 0.');
+      return;
+    }
+
+    setIsSubmittingNotFound(true);
+    try {
+      const res = await addChemical({
+        name,
+        englishName: name,
+        code: newChemCode.trim() || name.slice(0, 4).toUpperCase(),
+        casNumber: newChemCas.trim() || 'N/A',
+        chemicalFormula: '',
+        grade: newChemGrade,
+        category: newChemCategory,
+        physicalForm: 'liquid',
+        primaryUnit: newChemUnit,
+        manufacturer: 'Standard Lab Supply',
+        catalogNumber: scannedCode || undefined,
+        barcode: scannedCode || undefined,
+        minimumStock: 500,
+        warningStock: 1000,
+        targetStock: 2500,
+        unitPrice: 100000,
+        storageLocation: {
+          building: 'Building A',
+          room: 'Room 302',
+          cabinet: newBottleCabinetInput || 'Cabinet C1',
+          shelf: newBottleShelfInput || 'Shelf 1',
+        },
+        storageConditions: 'Nơi thoáng mát 20-25°C',
+        safetyInfo: {
+          ghsPictograms: ['irritant'],
+          hazardClass: 'H315, H319',
+          ppe: ['Găng tay', 'Kính'],
+          incompatibilities: '',
+        },
+        responsiblePerson: currentUser.name,
+        initialBottle: {
+          quantity: qty,
+          unit: newChemUnit,
+          lotNumber: newChemLot.trim() || `LOT-${new Date().getFullYear()}-001`,
+          expiryDate: newChemExpiry || '2028-10-01',
+          bottleCode: newChemCode ? `${newChemCode.trim()}-001` : `${name.slice(0, 3).toUpperCase()}-001`,
+          qrCode: scannedCode || undefined,
+        },
+      });
+
+      if (!res.success) {
+        setNotFoundError(res.message);
+        return;
+      }
+
+      setNotFoundSuccess(res.message);
+
+      if (res.chemical) setMatchedChemical(res.chemical);
+      if (res.bottle) setMatchedBottle(res.bottle);
+
+      setTimeout(() => {
+        setNotFoundSuccess(null);
+        setCurrentView('BOTTLE_DETAIL');
+      }, 1200);
+    } catch (err: any) {
+      setNotFoundError(err.message || 'Lỗi khi tạo hóa chất trong Supabase.');
+    } finally {
+      setIsSubmittingNotFound(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Bottle status derivations
@@ -816,13 +1195,13 @@ export const QrScannerModal: React.FC<Props> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Quét Mã Vạch / QR Trên Chai</span>
+                <span>Quét Mã QR / Barcode Hóa Chất</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  BARCODE & QR
+                  QR & 1D BARCODE
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400">
-                Tự động nhận diện mã vạch chai (Barcode 1D / Code 128) & mã QR → Tra cứu và thao tác chai tức thì
+                Nhận diện tức thì tem QR trên chai hoặc mã vạch nhà sản xuất → Nhập kho & xuất sử dụng tự động
               </p>
             </div>
           </div>
@@ -835,7 +1214,7 @@ export const QrScannerModal: React.FC<Props> = ({
                 className="px-3 py-1.5 text-xs font-semibold text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700/60 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Camera className="w-3.5 h-3.5" />
-                <span>Quét chai khác</span>
+                <span>Quét tiếp</span>
               </button>
             )}
 
@@ -861,6 +1240,9 @@ export const QrScannerModal: React.FC<Props> = ({
 
               <video
                 ref={videoRef}
+                playsInline
+                autoPlay
+                muted
                 className={`w-full h-full object-cover transition-opacity duration-300 ${
                   cameraActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
                 }`}
@@ -873,11 +1255,11 @@ export const QrScannerModal: React.FC<Props> = ({
                     <Camera className="w-7 h-7" />
                   </div>
                   <h3 className="text-sm font-bold text-white">
-                    {permissionDenied ? 'Yêu cầu quyền truy cập camera' : cameraError ? 'Không thể mở camera' : 'Đang bật camera tự động...'}
+                    {permissionDenied ? 'Yêu cầu quyền truy cập camera' : cameraError ? 'Không thể mở camera' : 'Đang khởi động camera...'}
                   </h3>
                   <p className="text-xs text-slate-300 mt-1 max-w-sm leading-relaxed">
                     {permissionDenied
-                      ? 'Vui lòng nhấn "Cho phép camera" bên dưới để hệ thống tự động nhận diện mã chai hóa chất.'
+                      ? 'Vui lòng nhấn "Cho phép camera" bên dưới để hệ thống quét nhận diện mã hóa chất.'
                       : cameraError || 'Đang kết nối ống kính camera...'}
                   </p>
 
@@ -893,13 +1275,31 @@ export const QrScannerModal: React.FC<Props> = ({
 
                     <button
                       type="button"
+                      onClick={() => cameraCaptureInputRef.current?.click()}
+                      className="px-3.5 py-2 text-xs font-bold text-emerald-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Chụp ảnh nhãn chai</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => fileInputRef.current?.click()}
                       className="px-3.5 py-2 text-xs font-semibold text-cyan-300 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800/60 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
                       <Upload className="w-3.5 h-3.5" />
-                      <span>Tải ảnh mã từ máy</span>
+                      <span>Tải ảnh từ máy</span>
                     </button>
                   </div>
+
+                  {permissionDenied && (
+                    <div className="mt-3 p-2 bg-slate-900/80 border border-slate-800 rounded-xl text-[10px] text-slate-400 text-left max-w-sm space-y-1">
+                      <p className="font-semibold text-cyan-300">💡 Hướng dẫn cấp quyền camera:</p>
+                      <p>• <strong>iPhone / iPad (Safari):</strong> Vào <em>Cài đặt &gt; Safari &gt; Camera &gt; Chọn Cho phép</em> rồi tải lại trang.</p>
+                      <p>• <strong>Android (Chrome):</strong> Nhấn vào biểu tượng thanh địa chỉ <em>(ổ khóa/cài đặt) &gt; Quyền &gt; Bật Máy ảnh</em>.</p>
+                      <p>• Hoặc bấm <strong>"Chụp ảnh nhãn chai"</strong> ở trên để chụp trực tiếp bằng ứng dụng máy ảnh.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -919,20 +1319,20 @@ export const QrScannerModal: React.FC<Props> = ({
                     {/* Center Helper Text */}
                     <div className="text-[10px] font-mono font-medium text-cyan-300/90 bg-slate-950/80 px-2.5 py-1 rounded-full border border-cyan-500/30 backdrop-blur-xs flex items-center gap-1.5">
                       <Barcode className="w-3 h-3 text-cyan-400" />
-                      <span>Căn mã QR hoặc Barcode 1D vào khung</span>
+                      <span>Căn mã QR hoặc Barcode vào khung</span>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* State: HUD Brief Loading (Requirement 3) */}
+              {/* State: HUD Brief Loading */}
               {isSearching && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-xs z-30 animate-in fade-in">
                   <div className="w-16 h-16 rounded-3xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 mb-3 animate-pulse shadow-[0_0_25px_rgba(6,182,212,0.4)]">
                     <RefreshCw className="w-8 h-8 animate-spin text-cyan-400" />
                   </div>
                   <h3 className="text-base font-bold text-white tracking-wide">
-                    Đang tìm chai hóa chất...
+                    Đang tra cứu dữ liệu...
                   </h3>
                   <div className="text-xs font-mono text-cyan-300 mt-1 flex items-center gap-1.5">
                     <span>Mã:</span>
@@ -948,7 +1348,7 @@ export const QrScannerModal: React.FC<Props> = ({
                 <div className="absolute bottom-3 inset-x-3 flex items-center justify-between z-20 pointer-events-auto">
                   <div className="flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-md px-2.5 py-1 rounded-xl border border-slate-700/60">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[10px] font-mono text-slate-300">Đang quét tự động</span>
+                    <span className="text-[10px] font-mono text-slate-300">Đang quét trực tiếp</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-md p-1 rounded-xl border border-slate-700/60">
@@ -971,16 +1371,25 @@ export const QrScannerModal: React.FC<Props> = ({
                       type="button"
                       onClick={toggleCameraFacing}
                       className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                      title="Đổi camera"
+                      title="Đổi camera trước/sau"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
 
                     <button
                       type="button"
+                      onClick={() => cameraCaptureInputRef.current?.click()}
+                      className="p-1.5 text-emerald-400 hover:text-white hover:bg-emerald-950/80 rounded-lg transition-colors cursor-pointer"
+                      title="Chụp ảnh trực tiếp bằng máy ảnh điện thoại"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => fileInputRef.current?.click()}
                       className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                      title="Tải ảnh QR/Barcode từ máy"
+                      title="Tải ảnh QR/Barcode từ thư viện"
                     >
                       <Upload className="w-4 h-4" />
                     </button>
@@ -993,6 +1402,15 @@ export const QrScannerModal: React.FC<Props> = ({
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+
+            <input
+              ref={cameraCaptureInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -1038,7 +1456,7 @@ export const QrScannerModal: React.FC<Props> = ({
                       type="submit"
                       className="px-4 py-2 text-xs font-bold text-slate-900 bg-cyan-400 hover:bg-cyan-300 rounded-xl transition-colors cursor-pointer shrink-0 shadow-xs"
                     >
-                      Tìm chai
+                      Tìm kiếm
                     </button>
                   </div>
                 </form>
@@ -1048,7 +1466,7 @@ export const QrScannerModal: React.FC<Props> = ({
         )}
 
         {/* ========================================================================= */}
-        {/* VIEW 2: BOTTLE DETAIL CARD (AUTO-OPENED UPON SUCCESSFUL DETECTION)         */}
+        {/* VIEW 2: BOTTLE DETAIL CARD (WHEN SPECIFIC BOTTLE IS IDENTIFIED)            */}
         {/* ========================================================================= */}
         {currentView === 'BOTTLE_DETAIL' && matchedBottle && (
           <div className="p-5 sm:p-6 space-y-5 flex-1 overflow-y-auto bg-slate-900 text-slate-100">
@@ -1110,13 +1528,13 @@ export const QrScannerModal: React.FC<Props> = ({
                 <div>
                   <div className="font-bold text-slate-200">CHAI ĐÃ HẾT DUNG TÍCH (0 {matchedBottle.unit})</div>
                   <div className="mt-0.5 text-slate-400">
-                    Vui lòng tiến hành Nhập kho thêm chai mới hoặc hủy bỏ chai rỗng.
+                    Vui lòng nhấn nút "Nhập kho thêm" bên dưới để nhập thêm lô mới hoặc cộng lượng tồn.
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Comprehensive Information Grid (Requirement 3) */}
+            {/* Comprehensive Information Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {/* Box 1: Quantity */}
               <div className="p-3 bg-slate-800/80 rounded-2xl border border-slate-700/60">
@@ -1127,14 +1545,14 @@ export const QrScannerModal: React.FC<Props> = ({
                 <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${
-                      matchedBottle.currentVolume / matchedBottle.initialVolume > 0.5
+                      matchedBottle.currentVolume / (matchedBottle.initialVolume || 1) > 0.5
                         ? 'bg-cyan-400'
-                        : matchedBottle.currentVolume / matchedBottle.initialVolume > 0.2
+                        : matchedBottle.currentVolume / (matchedBottle.initialVolume || 1) > 0.2
                         ? 'bg-amber-400'
                         : 'bg-rose-400'
                     }`}
                     style={{
-                      width: `${Math.min(100, (matchedBottle.currentVolume / matchedBottle.initialVolume) * 100)}%`,
+                      width: `${Math.min(100, (matchedBottle.currentVolume / (matchedBottle.initialVolume || 1)) * 100)}%`,
                     }}
                   />
                 </div>
@@ -1176,43 +1594,139 @@ export const QrScannerModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Additional Details: Manufacturer & Safety Info */}
-            <div className="p-3.5 bg-slate-800/50 rounded-2xl border border-slate-700/50 space-y-2 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300">
-                <span>
-                  Nhà sản xuất: <strong className="text-white">{matchedChemical?.manufacturer || 'Lab Standard'}</strong>
-                </span>
-                <span>
-                  Ngày nhập: <strong className="text-white">{matchedBottle.receivedDate || '2026-08-01'}</strong>
-                  {matchedBottle.openedDate && (
-                    <> · Mở nắp: <strong className="text-white">{matchedBottle.openedDate}</strong></>
-                  )}
-                </span>
-              </div>
-
-              {/* Safety pictograms & hazard statement */}
-              {matchedChemical?.safetyInfo?.ghsPictograms && matchedChemical.safetyInfo.ghsPictograms.length > 0 && (
-                <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-amber-300 font-semibold">
-                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>An toàn hóa chất:</span>
+            {/* ========================================================================= */}
+            {/* SUB-FORM: Quick Stock In (Nhập Kho Thêm)                                  */}
+            {/* ========================================================================= */}
+            {activeActionTab === 'STOCK_IN' && (
+              <div className="p-4 bg-slate-800/90 border border-emerald-500/40 rounded-2xl space-y-3.5 animate-in fade-in">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-700">
+                  <div className="flex items-center gap-2">
+                    <PackagePlus className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wide">
+                      Nhập Kho Thêm Cho {matchedChemical?.name}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {matchedChemical.safetyInfo.ghsPictograms.map((ghs) => (
-                      <span
-                        key={ghs}
-                        className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                      >
-                        {ghs}
-                      </span>
-                    ))}
+                  <span className="text-[11px] text-emerald-300 font-mono">
+                    Chai: {matchedBottle.bottleCode}
+                  </span>
+                </div>
+
+                {stockInSuccess && (
+                  <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{stockInSuccess}</span>
+                  </div>
+                )}
+
+                {stockInError && (
+                  <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-xl text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{stockInError}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-2 p-1 bg-slate-900 rounded-xl border border-slate-700/70 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setStockInMode('EXISTING_BOTTLE')}
+                    className={`flex-1 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                      stockInMode === 'EXISTING_BOTTLE'
+                        ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Cộng vào chai hiện tại ({matchedBottle.bottleCode})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStockInMode('NEW_BOTTLE')}
+                    className={`flex-1 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                      stockInMode === 'NEW_BOTTLE'
+                        ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Tạo thêm chai mới vào kho
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Số lượng nhập ({matchedBottle.unit}) <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.001"
+                      value={stockInQuantity}
+                      onChange={(e) => setStockInQuantity(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-sm focus:border-emerald-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Số Lô (Lot number) <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={stockInLot}
+                      onChange={(e) => setStockInLot(e.target.value)}
+                      placeholder="vd: LOT-2026-X1"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-emerald-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Hạn sử dụng <span className="text-emerald-400">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={stockInExpiry}
+                      onChange={(e) => setStockInExpiry(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-emerald-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Vị trí tủ lưu trữ
+                    </label>
+                    <input
+                      type="text"
+                      value={stockInCabinet}
+                      onChange={(e) => setStockInCabinet(e.target.value)}
+                      placeholder="vd: Cabinet C1"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-emerald-400 outline-hidden"
+                    />
                   </div>
                 </div>
-              )}
-            </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setActiveActionTab('NONE')}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmittingStockIn}
+                    onClick={handleExecuteQuickStockIn}
+                    className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isSubmittingStockIn ? 'Đang lưu vào Supabase...' : 'Xác nhận nhập kho'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* ========================================================================= */}
-            {/* SUB-FORM 1: Quick Usage Form (Xuất kho / Ghi sử dụng)                     */}
+            {/* SUB-FORM: Quick Usage Form (Xuất kho / Ghi sử dụng)                       */}
             {/* ========================================================================= */}
             {activeActionTab === 'USAGE' && (
               <div className="p-4 bg-slate-800/90 border border-cyan-500/40 rounded-2xl space-y-3.5 animate-in fade-in">
@@ -1250,52 +1764,38 @@ export const QrScannerModal: React.FC<Props> = ({
                     <input
                       type="number"
                       step="any"
-                      min="0"
-                      max={matchedBottle.currentVolume}
+                      min="0.001"
                       value={useQuantity}
                       onChange={(e) => setUseQuantity(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-sm focus:border-cyan-400 outline-hidden"
                     />
                     <div className="text-[10px] text-slate-400 mt-1">
-                      Còn lại: <strong className="text-white">{matchedBottle.currentVolume} {matchedBottle.unit}</strong>
+                      Tồn hiện tại: <strong className="text-cyan-300">{matchedBottle.currentVolume} {matchedBottle.unit}</strong>
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Mục đích thí nghiệm
-                    </label>
-                    <input
-                      type="text"
-                      value={usePurpose}
-                      onChange={(e) => setUsePurpose(e.target.value)}
-                      placeholder="Chiết mẫu, phân tích GC-MS..."
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Đề tài / Dự án
+                      Mã dự án / Đề tài
                     </label>
                     <input
                       type="text"
                       value={useProject}
                       onChange={(e) => setUseProject(e.target.value)}
-                      placeholder="Dự án nghiên cứu..."
+                      placeholder="vd: LAB-2026, TH-01"
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
                     />
                   </div>
 
-                  <div>
+                  <div className="sm:col-span-2">
                     <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Ghi chú thêm
+                      Mục đích sử dụng
                     </label>
                     <input
                       type="text"
-                      value={useNotes}
-                      onChange={(e) => setUseNotes(e.target.value)}
-                      placeholder="Ghi chú thao tác..."
+                      value={usePurpose}
+                      onChange={(e) => setUsePurpose(e.target.value)}
+                      placeholder="vd: Thí nghiệm kiểm nghiệm định lượng..."
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
                     />
                   </div>
@@ -1313,17 +1813,17 @@ export const QrScannerModal: React.FC<Props> = ({
                     type="button"
                     disabled={isSubmittingUsage}
                     onClick={handleExecuteQuickUsage}
-                    className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
-                    <span>{isSubmittingUsage ? 'Đang trừ kho...' : 'Xác nhận trừ kho'}</span>
+                    <span>{isSubmittingUsage ? 'Đang lưu...' : 'Xác nhận xuất kho'}</span>
                   </button>
                 </div>
               </div>
             )}
 
             {/* ========================================================================= */}
-            {/* SUB-FORM 2: Quick Adjust Stock Form (Manager Only)                        */}
+            {/* SUB-FORM: Quick Stock Adjust (Manager only)                               */}
             {/* ========================================================================= */}
             {activeActionTab === 'ADJUST' && isManager && (
               <div className="p-4 bg-slate-800/90 border border-amber-500/40 rounded-2xl space-y-3.5 animate-in fade-in">
@@ -1331,10 +1831,10 @@ export const QrScannerModal: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="w-4 h-4 text-amber-400" />
                     <span className="text-xs font-bold text-white uppercase tracking-wide">
-                      Điều Chỉnh Tồn Kho Chai {matchedBottle.bottleCode} (Quản lý)
+                      Điều Chỉnh Tồn Kho Chai {matchedBottle.bottleCode}
                     </span>
                   </div>
-                  <span className="text-[11px] text-amber-300 font-mono">Quyền: MANAGER</span>
+                  <span className="text-[11px] text-amber-300 font-mono">Quản Lý Phòng Lab</span>
                 </div>
 
                 {adjustSuccess && (
@@ -1346,7 +1846,7 @@ export const QrScannerModal: React.FC<Props> = ({
 
                 {adjustError && (
                   <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-xl text-xs flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>{adjustError}</span>
                   </div>
                 )}
@@ -1386,19 +1886,6 @@ export const QrScannerModal: React.FC<Props> = ({
                       <option value="Khác">Khác</option>
                     </select>
                   </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Ghi chú đối soát kiểm kê
-                    </label>
-                    <input
-                      type="text"
-                      value={adjustNotes}
-                      onChange={(e) => setAdjustNotes(e.target.value)}
-                      placeholder="Ghi chú chi tiết cho biên bản kiểm kê..."
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-amber-400 outline-hidden"
-                    />
-                  </div>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-700">
@@ -1422,57 +1909,7 @@ export const QrScannerModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* ========================================================================= */}
-            {/* SUB-FORM 3: Bottle Usage History Accordion                                */}
-            {/* ========================================================================= */}
-            {activeActionTab === 'HISTORY' && (
-              <div className="p-4 bg-slate-800/90 border border-slate-700 rounded-2xl space-y-2.5 animate-in fade-in">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-bold text-white">
-                    <History className="w-4 h-4 text-cyan-400" />
-                    <span>Lịch sử sử dụng & điều chỉnh chai {matchedBottle.bottleCode}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveActionTab('NONE')}
-                    className="text-slate-400 hover:text-white text-xs cursor-pointer"
-                  >
-                    Đóng
-                  </button>
-                </div>
-
-                {bottleTxs.length === 0 ? (
-                  <div className="text-center py-4 text-slate-400 text-xs">
-                    Chưa có lịch sử giao dịch nào được ghi nhận cho chai này.
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                    {bottleTxs.map((tx) => (
-                      <div
-                        key={tx.id}
-                        className="p-2.5 bg-slate-900/80 rounded-xl border border-slate-800 text-xs flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="font-semibold text-white">
-                            {tx.type === 'ADJUSTMENT' ? '⚡ Điều chỉnh tồn' : '📉 Xuất sử dụng'}:{' '}
-                            {tx.type === 'ADJUSTMENT' ? `${tx.previousStock} → ${tx.newStock}` : `-${tx.quantity}`}{' '}
-                            {tx.unit}
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            Bởi: <strong>{tx.user}</strong> · {tx.date} ({tx.notes || tx.purpose || 'N/A'})
-                          </div>
-                        </div>
-                        <div className="text-right font-mono text-[11px] text-cyan-300">
-                          {tx.newStock} {tx.unit}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Quick Action Footer Buttons (Requirement 3: Nhập, Xuất, Điều chỉnh, Lịch sử, Đóng) */}
+            {/* Quick Action Footer Buttons */}
             <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex items-center gap-2">
                 <button
@@ -1505,19 +1942,20 @@ export const QrScannerModal: React.FC<Props> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 1. Nhập kho thêm */}
+                {/* 1. Nhập kho thêm (INLINE QUICK ACTION) */}
                 <button
                   type="button"
-                  onClick={() => {
-                    onClose();
-                    if (onOpenStockIn) {
-                      onOpenStockIn(matchedBottle.chemicalId, matchedBottle.bottleCode);
-                    }
-                  }}
-                  className="px-3.5 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  onClick={() =>
+                    setActiveActionTab(activeActionTab === 'STOCK_IN' ? 'NONE' : 'STOCK_IN')
+                  }
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs border ${
+                    activeActionTab === 'STOCK_IN'
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                      : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700'
+                  }`}
                 >
-                  <PackagePlus className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Nhập kho</span>
+                  <PackagePlus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Nhập kho thêm</span>
                 </button>
 
                 {/* 2. Điều chỉnh số lượng (Chỉ Manager) */}
@@ -1534,14 +1972,13 @@ export const QrScannerModal: React.FC<Props> = ({
                     }`}
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Điều chỉnh số lượng</span>
+                    <span>Điều chỉnh tồn</span>
                   </button>
                 )}
 
                 {/* 3. Xuất kho / Ghi sử dụng */}
                 {!isExpired && !isEmpty && (
                   <>
-                    {/* Nút 1-chạm: Dùng hết 1 chai (Cách 1) */}
                     <button
                       type="button"
                       disabled={isSubmittingUsage}
@@ -1558,10 +1995,14 @@ export const QrScannerModal: React.FC<Props> = ({
                       onClick={() =>
                         setActiveActionTab(activeActionTab === 'USAGE' ? 'NONE' : 'USAGE')
                       }
-                      className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer ${
+                        activeActionTab === 'USAGE'
+                          ? 'bg-cyan-500 text-slate-950'
+                          : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950'
+                      }`}
                     >
                       <FlaskConical className="w-4 h-4" />
-                      <span>Nhập số mL dùng</span>
+                      <span>Ghi dùng (mL)</span>
                     </button>
                   </>
                 )}
@@ -1571,51 +2012,421 @@ export const QrScannerModal: React.FC<Props> = ({
         )}
 
         {/* ========================================================================= */}
-        {/* VIEW 3: NOT FOUND NOTIFICATION (Requirement 4)                            */}
+        {/* VIEW 3: CHEMICAL_DETAIL CARD (MASTER CHEMICAL FOUND, BUT 0 BOTTLES IN LAB)  */}
+        {/* ========================================================================= */}
+        {currentView === 'CHEMICAL_DETAIL' && matchedChemical && (
+          <div className="p-5 sm:p-6 space-y-5 flex-1 overflow-y-auto bg-slate-900 text-slate-100">
+            <div className="p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-2xl flex items-center gap-3 shadow-inner">
+              <div className="p-2.5 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shrink-0">
+                <FlaskConical className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 font-mono">
+                  DANH MỤC HÓA CHẤT (KHO CHƯA CÓ CHAI NÀO)
+                </div>
+                <h3 className="text-base font-bold text-white truncate mt-0.5">
+                  {matchedChemical.name}
+                </h3>
+                <div className="text-xs text-slate-300 font-mono mt-0.5">
+                  CAS: <strong className="text-cyan-300">{matchedChemical.casNumber}</strong> · Mã: <strong className="text-slate-200">{matchedChemical.code}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-800/90 border border-slate-700 rounded-2xl space-y-3">
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <PackagePlus className="w-4 h-4 text-emerald-400" />
+                <span>Nhập chai đầu tiên cho hóa chất này</span>
+              </h4>
+
+              {stockInSuccess && (
+                <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{stockInSuccess}</span>
+                </div>
+              )}
+
+              {stockInError && (
+                <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-xl text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{stockInError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Mã chai dán tem QR <span className="text-cyan-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={scannedCode}
+                    readOnly
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-cyan-300 font-mono text-xs outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Dung tích chai ({matchedChemical.primaryUnit}) <span className="text-cyan-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={stockInQuantity}
+                    onChange={(e) => setStockInQuantity(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-sm focus:border-cyan-400 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Số Lô (Lot number) <span className="text-cyan-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={stockInLot}
+                    onChange={(e) => setStockInLot(e.target.value)}
+                    placeholder="vd: LOT-2026-001"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-cyan-400 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Hạn sử dụng <span className="text-cyan-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={stockInExpiry}
+                    onChange={(e) => setStockInExpiry(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleRescan}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Quét mã khác
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingStockIn}
+                  onClick={handleExecuteQuickStockIn}
+                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSubmittingStockIn ? 'Đang lưu vào Supabase...' : 'Lưu chai mới vào kho'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 4: NOT FOUND NOTIFICATION & FAST RESOLUTION TABS                     */}
         {/* ========================================================================= */}
         {currentView === 'NOT_FOUND' && (
-          <div className="p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-4 flex-1 bg-slate-900 animate-in fade-in">
-            <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
-              <AlertCircle className="w-8 h-8" />
-            </div>
-
-            <div>
-              <h3 className="text-base font-bold text-white tracking-tight">
-                Không tìm thấy chai hóa chất
-              </h3>
-              <div className="mt-1 text-xs text-slate-400 font-mono">
-                Mã: <strong className="text-amber-300 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700">{scannedCode || 'N/A'}</strong>
+          <div className="p-5 sm:p-6 flex flex-col space-y-4 flex-1 bg-slate-900 animate-in fade-in overflow-y-auto">
+            {/* Top Alert Header */}
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3 shadow-inner">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white tracking-tight">
+                    Chưa có chai nào liên kết với mã này
+                  </h3>
+                  <div className="text-xs text-amber-300 font-mono mt-0.5 flex items-center gap-1.5">
+                    <span>Mã vừa quét:</span>
+                    <strong className="px-2 py-0.5 bg-amber-950 border border-amber-800 rounded font-bold">
+                      {scannedCode || 'N/A'}
+                    </strong>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-slate-400 mt-2 max-w-sm leading-relaxed">
-                Mã quét không trùng khớp với bất kỳ chai nào trong cơ sở dữ liệu Supabase. Bạn có thể quét lại hoặc thêm chai mới vào kho ngay.
-              </p>
-            </div>
 
-            {/* Exactly 2 options as requested in Requirement 4 */}
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
               <button
                 type="button"
                 onClick={handleRescan}
-                className="px-4 py-2.5 text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className="px-3 py-1.5 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-all cursor-pointer shrink-0"
               >
-                <Camera className="w-4 h-4 text-cyan-400" />
-                <span>Quét lại</span>
+                Quét lại
+              </button>
+            </div>
+
+            {/* Notification messages */}
+            {notFoundSuccess && (
+              <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{notFoundSuccess}</span>
+              </div>
+            )}
+
+            {notFoundError && (
+              <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-xl text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{notFoundError}</span>
+              </div>
+            )}
+
+            {/* Switch Tabs: Tab A (Add bottle to existing chem) vs Tab B (Create master chemical) */}
+            <div className="flex p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setNotFoundTab('ADD_BOTTLE_EXISTING_CHEM')}
+                className={`flex-1 py-2 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  notFoundTab === 'ADD_BOTTLE_EXISTING_CHEM'
+                    ? 'bg-cyan-500 text-slate-950 shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <PackagePlus className="w-3.5 h-3.5" />
+                <span>1. Gán vào hóa chất có sẵn</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  onClose();
-                  if (onOpenStockIn) {
-                    onOpenStockIn(undefined, scannedCode);
-                  }
-                }}
-                className="px-5 py-2.5 text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setNotFoundTab('CREATE_NEW_CHEM')}
+                className={`flex-1 py-2 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  notFoundTab === 'CREATE_NEW_CHEM'
+                    ? 'bg-cyan-500 text-slate-950 shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
               >
-                <Plus className="w-4 h-4" />
-                <span>Thêm chai mới</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>2. Tạo hóa chất mới hoàn toàn</span>
               </button>
             </div>
+
+            {/* ========================================================================= */}
+            {/* RESOLUTION TAB 1: ADD BOTTLE TO EXISTING MASTER CHEMICAL                  */}
+            {/* ========================================================================= */}
+            {notFoundTab === 'ADD_BOTTLE_EXISTING_CHEM' && (
+              <form onSubmit={handleNotFoundAddBottleToExisting} className="space-y-3.5 p-4 bg-slate-800/80 rounded-2xl border border-slate-700/80">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Chọn hóa chất trong phòng lab <span className="text-cyan-400">*</span>
+                  </label>
+                  <select
+                    value={selectedChemIdForNewBottle}
+                    onChange={(e) => {
+                      setSelectedChemIdForNewBottle(e.target.value);
+                      const c = chemicals.find((x) => x.id === e.target.value);
+                      if (c) setNewBottleUnitInput(c.primaryUnit);
+                    }}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
+                  >
+                    {activeChemicals.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.casNumber}) · Mã: {c.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Mã chai gắn tem QR <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newBottleCodeInput}
+                      onChange={(e) => setNewBottleCodeInput(e.target.value)}
+                      placeholder="vd: HEX-001"
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Dung tích chai ({newBottleUnitInput}) <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.001"
+                      value={newBottleQtyInput}
+                      onChange={(e) => setNewBottleQtyInput(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-sm focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Số Lô (Lot number) <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newBottleLotInput}
+                      onChange={(e) => setNewBottleLotInput(e.target.value)}
+                      placeholder="vd: LOT-2026-X1"
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Hạn sử dụng <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={newBottleExpiryInput}
+                      onChange={(e) => setNewBottleExpiryInput(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      if (onOpenStockIn) {
+                        onOpenStockIn(selectedChemIdForNewBottle, scannedCode);
+                      }
+                    }}
+                    className="text-xs text-slate-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Mở form Nhập kho đầy đủ</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingNotFound}
+                    className="px-5 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isSubmittingNotFound ? 'Đang lưu vào Supabase...' : 'Lưu chai mới vào kho'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ========================================================================= */}
+            {/* RESOLUTION TAB 2: CREATE BRAND NEW MASTER CHEMICAL & INITIAL BOTTLE       */}
+            {/* ========================================================================= */}
+            {notFoundTab === 'CREATE_NEW_CHEM' && (
+              <form onSubmit={handleNotFoundCreateNewChemical} className="space-y-3.5 p-4 bg-slate-800/80 rounded-2xl border border-slate-700/80">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Tên hóa chất mới <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newChemName}
+                      onChange={(e) => setNewChemName(e.target.value)}
+                      placeholder="vd: Acetone 99.5%, Axit Nitric 68%..."
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Mã hóa chất (Code)
+                    </label>
+                    <input
+                      type="text"
+                      value={newChemCode}
+                      onChange={(e) => setNewChemCode(e.target.value)}
+                      placeholder="vd: ACT, HNO3..."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Số CAS
+                    </label>
+                    <input
+                      type="text"
+                      value={newChemCas}
+                      onChange={(e) => setNewChemCas(e.target.value)}
+                      placeholder="vd: 67-64-1, 7697-37-2..."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-xs focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Danh mục
+                    </label>
+                    <select
+                      value={newChemCategory}
+                      onChange={(e) => setNewChemCategory(e.target.value as ChemicalCategory)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:border-cyan-400 outline-hidden"
+                    >
+                      <option value="Solvents">Dung môi (Solvents)</option>
+                      <option value="Acids">Axit (Acids)</option>
+                      <option value="Bases">Bazơ (Bases)</option>
+                      <option value="Salts">Muối vô cơ (Salts)</option>
+                      <option value="Reagents">Thuốc thử phân tích (Reagents)</option>
+                      <option value="Standards">Chất chuẩn (Standards)</option>
+                      <option value="Other">Khác (Other)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Dung tích chai ban đầu ({newChemUnit}) <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.001"
+                      value={newChemBottleQty}
+                      onChange={(e) => setNewChemBottleQty(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-sm focus:border-cyan-400 outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      if (onOpenAddChemical) {
+                        onOpenAddChemical(scannedCode, {
+                          name: newChemName,
+                          casNumber: newChemCas,
+                          category: newChemCategory,
+                          grade: newChemGrade,
+                        });
+                      }
+                    }}
+                    className="text-xs text-slate-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Mở form Thêm hóa chất đầy đủ</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingNotFound}
+                    className="px-5 py-2 text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isSubmittingNotFound ? 'Đang lưu vào Supabase...' : 'Tạo hóa chất & Nhập kho'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
       </div>

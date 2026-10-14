@@ -20,16 +20,16 @@ export const StockInModal: React.FC<Props> = ({
   preselectedBottleCode,
 }) => {
   const [entryTab, setEntryTab] = useState<'SUPERMARKET' | 'MANUAL'>(
-    preselectedChemicalId ? 'MANUAL' : 'SUPERMARKET'
+    preselectedChemicalId || preselectedBottleCode ? 'MANUAL' : 'SUPERMARKET'
   );
 
   useEffect(() => {
     if (isOpen) {
-      if (preselectedChemicalId) {
+      if (preselectedChemicalId || preselectedBottleCode) {
         setEntryTab('MANUAL');
       }
     }
-  }, [isOpen, preselectedChemicalId]);
+  }, [isOpen, preselectedChemicalId, preselectedBottleCode]);
   const {
     chemicals,
     stockIn,
@@ -115,6 +115,8 @@ export const StockInModal: React.FC<Props> = ({
     setQuickNewCabinetName('');
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     if (preselectedChemicalId) {
       setChemicalId(preselectedChemicalId);
@@ -131,7 +133,10 @@ export const StockInModal: React.FC<Props> = ({
       setChemicalId(chemicals[0].id);
       setUnit(chemicals[0].primaryUnit);
     }
-  }, [preselectedChemicalId, chemicals]);
+    if (preselectedBottleCode) {
+      setBottleCode(preselectedBottleCode);
+    }
+  }, [preselectedChemicalId, preselectedBottleCode, chemicals]);
 
   if (!isOpen) return null;
 
@@ -147,7 +152,7 @@ export const StockInModal: React.FC<Props> = ({
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -168,33 +173,40 @@ export const StockInModal: React.FC<Props> = ({
       return;
     }
 
-    const res = stockIn({
-      chemicalId,
-      bottleCode: bottleCode.trim() || undefined,
-      lotNumber: lotNumber.trim() || `LOT-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`,
-      quantity: qty,
-      unit,
-      supplier,
-      purchaseDate,
-      expiryDate,
-      storageLocation: {
-        building,
-        room,
-        cabinet,
-        shelf,
-      },
-      notes,
-    });
+    setIsSubmitting(true);
+    try {
+      const res = await stockIn({
+        chemicalId,
+        bottleCode: bottleCode.trim() || undefined,
+        lotNumber: lotNumber.trim() || `LOT-${new Date().getFullYear()}-${Math.floor(Math.random() * 900 + 100)}`,
+        quantity: qty,
+        unit,
+        supplier,
+        purchaseDate,
+        expiryDate,
+        storageLocation: {
+          building,
+          room,
+          cabinet,
+          shelf,
+        },
+        notes,
+      });
 
-    if (res.success) {
-      setSuccessMsg(res.message);
-      setErrorMsg(null);
-      setTimeout(() => {
-        setSuccessMsg(null);
-        onClose();
-      }, 1200);
-    } else {
-      setErrorMsg(res.message);
+      if (res.success) {
+        setSuccessMsg(res.message);
+        setErrorMsg(null);
+        setTimeout(() => {
+          setSuccessMsg(null);
+          onClose();
+        }, 1200);
+      } else {
+        setErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi khi nhập kho hóa chất.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -562,9 +574,9 @@ export const StockInModal: React.FC<Props> = ({
             </button>
             <button
               type="submit"
-              disabled={!canStockIn || exceedsStockInLimit}
+              disabled={!canStockIn || exceedsStockInLimit || isSubmitting}
               className={`px-5 py-2 text-xs font-semibold rounded-lg transition-colors shadow-xs ${
-                !canStockIn || exceedsStockInLimit
+                !canStockIn || exceedsStockInLimit || isSubmitting
                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
               }`}
@@ -573,6 +585,8 @@ export const StockInModal: React.FC<Props> = ({
                 ? 'Không có quyền'
                 : exceedsStockInLimit
                 ? 'Vượt hạn mức nhập'
+                : isSubmitting
+                ? 'Đang lưu vào Supabase...'
                 : 'Xác Nhận Nhập Kho (Stock In)'}
             </button>
           </div>

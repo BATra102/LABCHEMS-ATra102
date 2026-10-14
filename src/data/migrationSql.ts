@@ -836,6 +836,265 @@ END;
 $$;
 
 -- ====================================================================
+-- SECTION 13C: ATOMIC FUNCTION stock_in_bottle() (NHẬP KHO QUA QUÉT QR HOẶC FORM)
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.stock_in_bottle(
+  p_chemical_id UUID DEFAULT NULL,
+  p_bottle_code TEXT DEFAULT NULL,
+  p_qr_code TEXT DEFAULT NULL,
+  p_lot_number TEXT DEFAULT NULL,
+  p_quantity NUMERIC DEFAULT 500,
+  p_unit TEXT DEFAULT 'mL',
+  p_expiry_date DATE DEFAULT NULL,
+  p_storage_location TEXT DEFAULT NULL,
+  p_cabinet_id TEXT DEFAULT 'Cabinet C1',
+  p_cabinet_shelf TEXT DEFAULT 'Shelf 1',
+  p_existing_bottle_id UUID DEFAULT NULL,
+  p_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_caller_id UUID;
+  v_user RECORD;
+  v_chemical RECORD;
+  v_bottle RECORD;
+  v_new_bottle RECORD;
+  v_prev_qty NUMERIC;
+  v_new_qty NUMERIC;
+  v_new_status TEXT;
+  v_final_code TEXT;
+  v_final_qr TEXT;
+  v_target_chem_id UUID;
+  v_effective_expiry DATE;
+BEGIN
+  v_caller_id := auth.uid();
+  IF v_caller_id IS NOT NULL THEN
+    SELECT * INTO v_user FROM public.profiles WHERE id = v_caller_id;
+  END IF;
+
+  IF p_quantity IS NULL OR p_quantity <= 0 THEN
+    RAISE EXCEPTION 'Số lượng nhập kho phải lớn hơn 0';
+  END IF;
+
+  v_effective_expiry := COALESCE(p_expiry_date, (CURRENT_DATE + INTERVAL '2 years')::date);
+
+  -- CASE 1: CỘNG DUNG TÍCH VÀO CHAI ĐÃ CÓ (p_existing_bottle_id)
+  IF p_existing_bottle_id IS NOT NULL THEN
+    SELECT * INTO v_bottle FROM public.bottles WHERE id = p_existing_bottle_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Không tìm thấy chai hóa chất tương ứng với ID %', p_existing_bottle_id;
+    END IF;
+
+    SELECT * INTO v_chemical FROM public.chemicals WHERE id = v_bottle.chemical_id;
+    v_prev_qty := COALESCE(v_bottle.current_quantity, 0);
+    v_new_qty := ROUND((v_prev_qty + p_quantity)::numeric, 4);
+    IF v_new_qty <= 0 THEN
+      v_new_status := 'EMPTY';
+    ELSE
+      v_new_status := 'IN_USE';
+    END IF;
+
+    UPDATE public.bottles
+    SET
+      current_quantity = v_new_qty,
+      status = v_new_status,
+      updated_at = now()
+    WHERE id = p_existing_bottle_id
+    RETURNING * INTO v_bottle;
+
+    INSERT INTO public.stock_transactions (
+      chemical_id,
+      chemical_name,
+      bottle_id,
+      bottle_code,
+      user_id,
+      user_name,
+      transaction_type,
+      quantity,
+      unit,
+      quantity_before,
+      quantity_after,
+      notes,
+      created_at
+    ) VALUES (
+      v_chemical.id,
+      COALESCE(v_chemical.name, 'Hóa chất'),
+      v_bottle.id,
+      v_bottle.bottle_code,
+      v_caller_id,
+      COALESCE(v_user.full_name, 'Quản lý kho'),
+      'IMPORT',
+      p_quantity,
+      v_bottle.unit,
+      v_prev_qty,
+      v_new_qty,
+      COALESCE(p_notes, format('Cộng thêm tồn chai %s qua quét mã QR', v_bottle.bottle_code)),
+      now()
+    );
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'message', format('Đã cộng thêm +%s %s vào chai %s thành công!', p_quantity, v_bottle.unit, v_bottle.bottle_code),
+      'bottle', row_to_json(v_bottle)
+    );
+  END IF;
+
+  -- CASE 2: TẠO CHAI MỚI VÀO KHO
+  v_target_chem_id := p_chemical_id;
+  IF v_target_chem_id IS NULL THEN
+    SELECT id INTO v_target_chem_id FROM public.chemicals LIMIT 1;
+  END IF;
+
+  SELECT * INTO v_chemical FROM public.chemicals WHERE id = v_target_chem_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Không tìm thấy danh mục hóa chất tương ứng';
+  END IF;
+
+  -- Sinh mã chai duy nhất
+  v_final_code := COALESCE(NULLIF(TRIM(p_bottle_code), ''), 'BOT-' || UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 5)));
+  IF EXISTS (SELECT 1 FROM public.bottles WHERE bottle_code = v_final_code) THEN
+    v_final_code := v_final_code || '-' || FLOOR(RANDOM() * 900 + 100)::TEXT;
+  END IF;
+
+  -- Sinh mã QR duy nhất
+  v_final_qr := COALESCE(NULLIF(TRIM(p_qr_code), ''), v_final_code);
+  IF EXISTS (SELECT 1 FROM public.bottles WHERE qr_code = v_final_qr) THEN
+    v_final_qr := v_final_qr || '-' || FLOOR(RANDOM() * 900 + 100)::TEXT;
+  END IF;
+
+  INSERT INTO public.bottles (
+    chemical_id,
+    bottle_code,
+    qr_code,
+    barcode,
+    lot_number,
+    original_quantity,
+    current_quantity,
+    unit,
+    expiry_date,
+    storage_location,
+    cabinet_id,
+    cabinet_shelf,
+    status,
+    notes,
+    created_at,
+    updated_at
+  ) VALUES (
+    v_target_chem_id,
+    v_final_code,
+    v_final_qr,
+    v_final_code,
+    COALESCE(NULLIF(TRIM(p_lot_number), ''), 'LOT-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || FLOOR(RANDOM() * 9000 + 1000)::TEXT),
+    p_quantity,
+    p_quantity,
+    p_unit,
+    v_effective_expiry,
+    COALESCE(p_storage_location, '{"building":"Building A","room":"Room 302","cabinet":"Cabinet C1","shelf":"Shelf 1"}'),
+    COALESCE(p_cabinet_id, 'Cabinet C1'),
+    COALESCE(p_cabinet_shelf, 'Shelf 1'),
+    'SEALED',
+    COALESCE(p_notes, 'Nhập kho qua quét mã QR'),
+    now(),
+    now()
+  ) RETURNING * INTO v_new_bottle;
+
+  INSERT INTO public.stock_transactions (
+    chemical_id,
+    chemical_name,
+    bottle_id,
+    bottle_code,
+    user_id,
+    user_name,
+    transaction_type,
+    quantity,
+    unit,
+    quantity_before,
+    quantity_after,
+    reference_id,
+    notes,
+    created_at
+  ) VALUES (
+    v_target_chem_id,
+    v_chemical.name,
+    v_new_bottle.id,
+    v_new_bottle.bottle_code,
+    v_caller_id,
+    COALESCE(v_user.full_name, 'Quản lý kho'),
+    'IMPORT',
+    p_quantity,
+    p_unit,
+    0,
+    p_quantity,
+    v_new_bottle.id,
+    COALESCE(p_notes, format('Nhập chai mới [%s] từ quét mã QR', v_new_bottle.bottle_code)),
+    now()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'message', format('Đã nhập chai %s (%s %s) vào kho thành công!', v_new_bottle.bottle_code, p_quantity, p_unit),
+    'bottle', row_to_json(v_new_bottle)
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.stock_in_bottle TO authenticated, anon;
+
+-- ====================================================================
+-- SECTION 13D: ATOMIC FUNCTION create_chemical_and_bottle()
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.create_chemical_and_bottle(
+  p_name TEXT,
+  p_cas_number TEXT DEFAULT 'N/A',
+  p_category TEXT DEFAULT 'Other',
+  p_code TEXT DEFAULT NULL,
+  p_unit TEXT DEFAULT 'mL',
+  p_storage_location TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_new_chem RECORD;
+BEGIN
+  INSERT INTO public.chemicals (
+    name,
+    cas_number,
+    category,
+    catalog_number,
+    unit,
+    minimum_stock,
+    warning_stock,
+    storage_location,
+    status,
+    created_at,
+    updated_at
+  ) VALUES (
+    TRIM(p_name),
+    COALESCE(NULLIF(TRIM(p_cas_number), ''), 'N/A'),
+    COALESCE(p_category, 'Other'),
+    p_code,
+    COALESCE(p_unit, 'mL'),
+    500,
+    1000,
+    COALESCE(p_storage_location, '{"building":"Building A","room":"Room 302","cabinet":"Cabinet C1","shelf":"Shelf 1"}'),
+    'ACTIVE',
+    now(),
+    now()
+  ) RETURNING * INTO v_new_chem;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'chemical', row_to_json(v_new_chem)
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.create_chemical_and_bottle TO authenticated, anon;
+
+-- ====================================================================
 -- SECTION 14: ATOMIC FUNCTION resolve_location_change_request() (BẢO MẬT)
 -- Quy tắc:
 -- 1. auth.uid() BẮT BUỘC tồn tại (BỎ HOÀN TOÀN FALLBACK, Chặn Anonymous)
@@ -1180,32 +1439,74 @@ CREATE POLICY "profiles_manager_all" ON public.profiles FOR ALL TO authenticated
 DROP POLICY IF EXISTS "chemicals_read" ON public.chemicals;
 DROP POLICY IF EXISTS "chemicals_insert_manager" ON public.chemicals;
 DROP POLICY IF EXISTS "chemicals_update_manager" ON public.chemicals;
+DROP POLICY IF EXISTS "chemicals_insert_auth" ON public.chemicals;
+DROP POLICY IF EXISTS "chemicals_update_auth" ON public.chemicals;
 CREATE POLICY "chemicals_read" ON public.chemicals FOR SELECT TO authenticated USING (true);
-CREATE POLICY "chemicals_insert_manager" ON public.chemicals FOR INSERT TO authenticated WITH CHECK (public.is_manager());
-CREATE POLICY "chemicals_update_manager" ON public.chemicals FOR UPDATE TO authenticated USING (public.is_manager());
+CREATE POLICY "chemicals_insert_auth" ON public.chemicals FOR INSERT TO authenticated WITH CHECK (
+  public.is_manager() OR 
+  EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE id = auth.uid() AND (
+      role IN ('MANAGER', 'SENIOR_MANAGER', 'ADMIN') OR 
+      (permissions IS NOT NULL AND (permissions->>'createStockIn') = 'true')
+    )
+  )
+);
+CREATE POLICY "chemicals_update_auth" ON public.chemicals FOR UPDATE TO authenticated USING (
+  public.is_manager() OR 
+  EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE id = auth.uid() AND (
+      role IN ('MANAGER', 'SENIOR_MANAGER', 'ADMIN') OR 
+      (permissions IS NOT NULL AND (permissions->>'createStockIn') = 'true')
+    )
+  )
+);
 
--- 5. Bottles (KHÓA UPDATE CỦA USER: USER KHÔNG THỂ UPDATE CURRENT_QUANTITY HAY BOTTLE FIELDS)
+-- 5. Bottles (Quản lý và thành viên có quyền nhập kho có thể tạo/cập nhật)
 DROP POLICY IF EXISTS "bottles_read" ON public.bottles;
 DROP POLICY IF EXISTS "bottles_update_all" ON public.bottles;
 DROP POLICY IF EXISTS "bottles_insert_manager" ON public.bottles;
 DROP POLICY IF EXISTS "bottles_update_manager" ON public.bottles;
+DROP POLICY IF EXISTS "bottles_insert_auth" ON public.bottles;
+DROP POLICY IF EXISTS "bottles_update_auth" ON public.bottles;
 CREATE POLICY "bottles_read" ON public.bottles FOR SELECT TO authenticated USING (true);
-CREATE POLICY "bottles_insert_manager" ON public.bottles FOR INSERT TO authenticated WITH CHECK (public.is_manager());
-CREATE POLICY "bottles_update_manager" ON public.bottles FOR UPDATE TO authenticated USING (public.is_manager()) WITH CHECK (public.is_manager());
+CREATE POLICY "bottles_insert_auth" ON public.bottles FOR INSERT TO authenticated WITH CHECK (
+  public.is_manager() OR 
+  EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE id = auth.uid() AND (
+      role IN ('MANAGER', 'SENIOR_MANAGER', 'ADMIN') OR 
+      (permissions IS NOT NULL AND (permissions->>'createStockIn') = 'true')
+    )
+  )
+);
+CREATE POLICY "bottles_update_auth" ON public.bottles FOR UPDATE TO authenticated USING (
+  public.is_manager() OR 
+  EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE id = auth.uid() AND (
+      role IN ('MANAGER', 'SENIOR_MANAGER', 'ADMIN') OR 
+      (permissions IS NOT NULL AND (permissions->>'createStockIn') = 'true')
+    )
+  )
+);
 
 -- 6. Usage Transactions (XÓA HOÀN TOÀN usage_insert_user: CHỈ SECURITY DEFINER RPC ĐƯỢC GHI)
 DROP POLICY IF EXISTS "usage_read" ON public.usage_transactions;
 DROP POLICY IF EXISTS "usage_insert_user" ON public.usage_transactions;
 DROP POLICY IF EXISTS "usage_insert" ON public.usage_transactions;
 CREATE POLICY "usage_read" ON public.usage_transactions FOR SELECT TO authenticated USING (auth.uid() = user_id OR public.is_manager());
--- TUYỆT ĐỐI KHÔNG CẤP POLICY INSERT CHO AUTHENTICATED TRÊN BẢNG USAGE_TRANSACTIONS!
 
--- 7. Stock Transactions (CHỈ MANAGER ĐƯỢC PHÉP TẠO STOCK TRANSACTION VỚI USER_ID = AUTH.UID())
+-- 7. Stock Transactions (Cho phép người dùng xác thực ghi nhận nhập/xuất)
 DROP POLICY IF EXISTS "stock_read" ON public.stock_transactions;
 DROP POLICY IF EXISTS "stock_insert" ON public.stock_transactions;
 DROP POLICY IF EXISTS "stock_insert_manager" ON public.stock_transactions;
+DROP POLICY IF EXISTS "stock_insert_auth" ON public.stock_transactions;
 CREATE POLICY "stock_read" ON public.stock_transactions FOR SELECT TO authenticated USING (true);
-CREATE POLICY "stock_insert_manager" ON public.stock_transactions FOR INSERT TO authenticated WITH CHECK (public.is_manager() AND user_id = auth.uid());
+CREATE POLICY "stock_insert_auth" ON public.stock_transactions FOR INSERT TO authenticated WITH CHECK (
+  public.is_manager() OR user_id = auth.uid() OR user_id IS NULL
+);
 
 -- 8. Audit Logs (XÓA HOÀN TOÀN audit_insert_user: CHỈ RPC VÀ TRIGGER ĐƯỢC GHI)
 DROP POLICY IF EXISTS "audit_read_manager" ON public.audit_logs;
@@ -1362,4 +1663,65 @@ BEGIN
     role = 'MANAGER', status = 'ACTIVE', must_change_password = false, updated_at = now();
 END $$;
 
+-- ====================================================================
+-- SECTION 25: RPC FUNCTION stock_in_bottle (SECURITY DEFINER)
+-- Hỗ trợ nhập kho trực tiếp từ quét QR trên iOS/Android/Web
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.stock_in_bottle(
+  p_chemical_id UUID,
+  p_bottle_code TEXT,
+  p_quantity NUMERIC,
+  p_unit TEXT DEFAULT 'mL',
+  p_lot_number TEXT DEFAULT NULL,
+  p_expiry_date DATE DEFAULT NULL,
+  p_storage_location TEXT DEFAULT NULL,
+  p_cabinet_id TEXT DEFAULT 'Cabinet C1',
+  p_cabinet_shelf TEXT DEFAULT 'Shelf 1',
+  p_qr_code TEXT DEFAULT NULL,
+  p_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_bottle_id UUID;
+  v_result JSONB;
+BEGIN
+  INSERT INTO public.bottles (
+    chemical_id,
+    bottle_code,
+    qr_code,
+    lot_number,
+    original_quantity,
+    current_quantity,
+    unit,
+    expiry_date,
+    storage_location,
+    cabinet_id,
+    cabinet_shelf,
+    status
+  ) VALUES (
+    p_chemical_id,
+    p_bottle_code,
+    COALESCE(p_qr_code, p_bottle_code),
+    COALESCE(p_lot_number, 'LOT-' || to_char(now(), 'YYYY') || '-001'),
+    p_quantity,
+    p_quantity,
+    COALESCE(p_unit, 'mL'),
+    COALESCE(p_expiry_date, (CURRENT_DATE + INTERVAL '2 years')::DATE),
+    COALESCE(p_storage_location, '{"building":"Building A","room":"Room 302","cabinet":"Cabinet C1","shelf":"Shelf 1"}'),
+    COALESCE(p_cabinet_id, 'Cabinet C1'),
+    COALESCE(p_cabinet_shelf, 'Shelf 1'),
+    'SEALED'
+  )
+  RETURNING id INTO v_bottle_id;
+
+  SELECT to_jsonb(b) INTO v_result FROM public.bottles b WHERE b.id = v_bottle_id;
+  RETURN v_result;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.stock_in_bottle TO authenticated, anon;
 `;
+

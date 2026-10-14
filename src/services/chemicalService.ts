@@ -108,34 +108,100 @@ export const chemicalService = {
     }
   },
 
-  async insert(chemical: Omit<Chemical, 'id'>): Promise<{ data: Chemical | null; error: any }> {
+  async insert(chemical: Omit<Chemical, 'id'> & { id?: string }): Promise<{ data: Chemical | null; error: any }> {
+    const isUuid = (val?: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val || '');
+
+    // 1. Try server-side API first
+    try {
+      let authToken: string | undefined = undefined;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        authToken = sessionData?.session?.access_token;
+      } catch (_) {}
+
+      const response = await fetch('/api/add-chemical', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          name: chemical.name,
+          englishName: chemical.englishName,
+          code: chemical.code,
+          casNumber: chemical.casNumber,
+          category: chemical.category,
+          grade: chemical.grade,
+          physicalForm: chemical.physicalForm,
+          primaryUnit: chemical.primaryUnit,
+          manufacturer: chemical.manufacturer,
+          catalogNumber: chemical.catalogNumber,
+          storageLocation: chemical.storageLocation,
+        }),
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        if (json.success && json.chemical) {
+          return { data: json.chemical, error: null };
+        }
+      }
+    } catch (_) {
+      // API call failed, fallback to direct Supabase
+    }
+
     if (!isSupabaseConfigured()) {
       return { data: null, error: new Error('Supabase chưa cấu hình') };
     }
 
+    // 2. Try Supabase RPC create_chemical_and_bottle
     try {
+      const locStr = typeof chemical.storageLocation === 'object' && chemical.storageLocation !== null
+        ? JSON.stringify(chemical.storageLocation)
+        : '{"building":"Building A","room":"Room 302","cabinet":"Cabinet C1","shelf":"Shelf 1"}';
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc('create_chemical_and_bottle', {
+        p_name: chemical.name,
+        p_cas_number: chemical.casNumber || 'N/A',
+        p_category: chemical.category || 'Other',
+        p_code: chemical.code || null,
+        p_unit: chemical.primaryUnit || 'mL',
+        p_storage_location: locStr,
+      });
+
+      if (!rpcError && rpcData && rpcData.success && rpcData.chemical) {
+        return { data: rowToChemical(rpcData.chemical), error: null };
+      }
+    } catch (_) {}
+
+    try {
+      const locStr = typeof chemical.storageLocation === 'object' && chemical.storageLocation !== null
+        ? JSON.stringify(chemical.storageLocation)
+        : '{"building":"Building A","room":"Room 302","cabinet":"Cabinet C1","shelf":"Shelf 1"}';
+
       const payload: any = {
         name: chemical.name,
-        cas_number: chemical.casNumber,
-        category: chemical.category,
+        cas_number: (chemical.casNumber || 'N/A').trim(),
+        category: chemical.category || 'Other',
         concentration: chemical.chemicalFormula || null,
         purity: chemical.grade || null,
-        manufacturer: chemical.manufacturer || null,
+        manufacturer: chemical.manufacturer || 'Standard Lab Supply',
         catalog_number: chemical.catalogNumber || chemical.code || null,
         unit: chemical.primaryUnit || 'mL',
-        minimum_stock: chemical.minimumStock || 0,
-        warning_stock: chemical.warningStock || 0,
+        minimum_stock: Number(chemical.minimumStock) || 0,
+        warning_stock: Number(chemical.warningStock) || 0,
         hazard_class: chemical.safetyInfo?.hazardClass || null,
         ghs_symbols: chemical.safetyInfo?.ghsPictograms || [],
-        storage_location: JSON.stringify(chemical.storageLocation),
+        storage_location: locStr,
         storage_requirements: chemical.storageConditions || null,
         description: chemical.notes || chemical.englishName || null,
         sds_url: chemical.safetyInfo?.sdsUrl || null,
         status: chemical.status || 'ACTIVE',
       };
 
-      if ((chemical as any).id) {
-        payload.id = (chemical as any).id;
+      if (chemical.id && isUuid(chemical.id)) {
+        payload.id = chemical.id;
       }
 
       const { data, error } = await supabase

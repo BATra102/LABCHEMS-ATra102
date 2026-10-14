@@ -236,7 +236,7 @@ export default async function handler(req: any, res: any) {
             full_name: trimmedName,
             role: requestedRole,
             department: requestedDept,
-            must_change_password: true,
+            must_change_password: false,
           },
         });
       } else {
@@ -282,7 +282,7 @@ export default async function handler(req: any, res: any) {
       status: dbStatus,
       department: requestedDept,
       member_code: usernameClean,
-      must_change_password: true,
+      must_change_password: false,
       updated_at: new Date().toISOString(),
     };
 
@@ -369,7 +369,7 @@ export default async function handler(req: any, res: any) {
       status: requestedStatus,
       department: requestedDept,
       dateJoined: new Date().toISOString().split('T')[0],
-      must_change_password: true,
+      must_change_password: false,
     };
 
     return res.status(200).json({

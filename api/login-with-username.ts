@@ -306,7 +306,7 @@ export default async function handler(req: any, res: any) {
       role: assignedRole,
       status: assignedStatus,
       department: targetProfile?.department || 'Bộ môn Dược liệu & Chiết xuất',
-      must_change_password: Boolean(targetProfile?.must_change_password),
+      must_change_password: false,
     };
 
     if (returnedUser.status !== 'ACTIVE' && returnedUser.role !== 'SENIOR_MANAGER' && returnedUser.role !== 'MANAGER' && !isLabManager) {

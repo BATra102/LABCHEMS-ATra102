@@ -172,11 +172,11 @@ async function startServer() {
         });
       }
 
-      // 6. Đặt cờ must_change_password = true, giữ nguyên trạng thái ACTIVE/LOCKED hiện tại
+      // 6. Cập nhật mật khẩu trong profiles
       await clientWithToken
         .from('profiles')
         .update({
-          must_change_password: true,
+          must_change_password: false,
           updated_at: new Date().toISOString(),
         })
         .eq('id', targetUserId);
@@ -189,11 +189,11 @@ async function startServer() {
         actor_name: callerProfile?.full_name || callerEmail || 'Quản lý',
         actor_user_id: callerAuthUser.id,
         user_id: callerAuthUser.id,
-        description: `Người quản lý đã cấp lại mật khẩu cho tài khoản: ${targetProfile.full_name} (${targetEmail}). Yêu cầu đổi mật khẩu ở lần đăng nhập tiếp theo.`,
+        description: `Người quản lý đã cấp lại mật khẩu cho tài khoản: ${targetProfile.full_name} (${targetEmail}).`,
         new_data: {
           targetUserId,
           targetEmail,
-          must_change_password: true,
+          must_change_password: false,
           status: targetProfile.status,
           resetAt: new Date().toISOString(),
         },
@@ -714,7 +714,7 @@ async function startServer() {
         role: targetProfile.role,
         status: targetProfile.status,
         department: targetProfile.department || 'Bộ môn Dược liệu & Chiết xuất',
-        must_change_password: Boolean(targetProfile.must_change_password),
+        must_change_password: false,
       };
 
       return res.json({
@@ -998,7 +998,7 @@ async function startServer() {
         role: dbRole,
         status: dbStatus,
         department: requestedDept,
-        must_change_password: true,
+        must_change_password: false,
         updated_at: new Date().toISOString(),
       };
 
@@ -1083,7 +1083,7 @@ async function startServer() {
         role: requestedRole,
         status: requestedStatus,
         department: requestedDept,
-        must_change_password: true,
+        must_change_password: false,
         dateJoined: new Date().toISOString().split('T')[0],
       };
 
@@ -1186,6 +1186,35 @@ async function startServer() {
       return res.json({ success: true, data: fallbackList });
     }
   });
+
+  /**
+   * POST /api/stock-in
+   * Nhập kho hóa chất / chai mới / cộng thêm tồn kho an toàn
+   */
+  app.all('/api/stock-in', async (req, res) => {
+    try {
+      const handler = (await import('./api/stock-in')).default;
+      return handler(req, res);
+    } catch (err: any) {
+      console.error('Server error dispatching /api/stock-in:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Lỗi máy chủ khi nhập kho.' });
+    }
+  });
+
+  /**
+   * POST /api/add-chemical
+   * Tạo hóa chất mới và chai ban đầu
+   */
+  app.all('/api/add-chemical', async (req, res) => {
+    try {
+      const handler = (await import('./api/add-chemical')).default;
+      return handler(req, res);
+    } catch (err: any) {
+      console.error('Server error dispatching /api/add-chemical:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Lỗi máy chủ khi tạo hóa chất.' });
+    }
+  });
+
 
   // Tích hợp Vite middleware trong môi trường dev hoặc phục vụ file tĩnh trong production
   if (process.env.NODE_ENV === 'production') {

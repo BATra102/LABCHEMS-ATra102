@@ -77,7 +77,7 @@ export default async function handler(req: any, res: any) {
       position: row.job_title,
       phone: row.phone,
       member_code: row.member_code,
-      must_change_password: Boolean(row.must_change_password),
+      must_change_password: false,
       dateJoined: row.created_at ? row.created_at.split('T')[0] : undefined,
     }));
 

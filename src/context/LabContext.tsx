@@ -156,6 +156,7 @@ interface LabContextType {
   stockIn: (params: {
     chemicalId: string;
     bottleCode?: string;
+    qrCode?: string;
     lotNumber: string;
     quantity: number;
     unit: ChemicalUnit;
@@ -166,7 +167,7 @@ interface LabContextType {
     storageLocation?: { building: string; room: string; cabinet: string; shelf: string };
     notes?: string;
     existingBottleId?: string;
-  }) => { success: boolean; message: string; bottleId?: string; limitExceeded?: boolean };
+  }) => Promise<{ success: boolean; message: string; bottleId?: string; bottle?: Bottle; limitExceeded?: boolean }>;
 
   // Supermarket-style Multi-scan Barcode Stock In & Stock Out
   batchStockInByBarcode: (params: {
@@ -248,7 +249,7 @@ interface LabContextType {
   sendManualTestEmailAlert: (chemicalId?: string) => { success: boolean; message: string };
 
   // Master Chemical management & Lifecycle (Manager only - Mục 4, 7, 10, Soft Delete & Restore)
-  addChemical: (chemical: Omit<Chemical, 'id'>) => { success: boolean; message: string; chemical?: Chemical };
+  addChemical: (chemical: Omit<Chemical, 'id'> & { initialBottle?: any }) => Promise<{ success: boolean; message: string; chemical?: Chemical; bottle?: Bottle }>;
   updateChemical: (id: string, chemical: Partial<Chemical>) => { success: boolean; message: string };
   archiveChemical: (id: string, reason?: string) => { success: boolean; message: string };
   restoreChemical: (id: string, reason?: string) => { success: boolean; message: string };
@@ -2590,9 +2591,10 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
   // =========================================================================
   // STOCK IN WORKFLOW (Section 51: Manager Only)
   // =========================================================================
-  const stockIn = ({
+  const stockIn = async ({
     chemicalId,
     bottleCode,
+    qrCode,
     lotNumber,
     quantity,
     unit,
@@ -2606,6 +2608,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
   }: {
     chemicalId: string;
     bottleCode?: string;
+    qrCode?: string;
     lotNumber: string;
     quantity: number;
     unit: ChemicalUnit;
@@ -2616,7 +2619,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     storageLocation?: { building: string; room: string; cabinet: string; shelf: string };
     notes?: string;
     existingBottleId?: string;
-  }) => {
+  }): Promise<{ success: boolean; message: string; bottleId?: string; bottle?: Bottle; limitExceeded?: boolean }> => {
     const canStockIn = isManager || currentUser.permissions?.createStockIn;
     if (!canStockIn) {
       return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý hoặc thành viên được cấp quyền mới có thể nhập kho hóa chất.' };
@@ -2645,6 +2648,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
     let targetBottleId = '';
     let targetBottleCode = '';
     let updatedBottlesList = [...bottles];
+    let createdOrUpdatedBottle: Bottle | null = null;
 
     if (existingBottleId) {
       const bIdx = updatedBottlesList.findIndex((b) => b.id === existingBottleId);
@@ -2654,16 +2658,21 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         const newVol = Math.round((b.currentVolume + addedInBottleUnit) * 10000) / 10000;
         const newStatus = calculateBottleStatus(newVol, b.initialVolume + addedInBottleUnit, b.expiryDate, referenceDate);
 
-        updatedBottlesList[bIdx] = {
+        const updatedB: Bottle = {
           ...b,
           currentVolume: newVol,
           initialVolume: b.initialVolume + addedInBottleUnit,
           status: newStatus,
         };
+        updatedBottlesList[bIdx] = updatedB;
         targetBottleId = b.id;
         targetBottleCode = b.bottleCode;
-        if (isSupabaseConfigured()) {
-          bottleService.updateQuantity(targetBottleId, newVol, newStatus).catch((err) => console.warn('Supabase updateQuantity error:', err));
+        createdOrUpdatedBottle = updatedB;
+
+        try {
+          await bottleService.updateQuantity(targetBottleId, newVol, newStatus);
+        } catch (err) {
+          console.warn('Supabase updateQuantity error:', err);
         }
       }
     } else {
@@ -2693,15 +2702,26 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       const autoCode = candidateCode;
       const nextNum = candidateNum;
 
-      const newBottleId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `bot-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
+      // RFC-4122 v4 UUID generator to guarantee valid PostgreSQL UUID type
+      const generateUuid = () => {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === 'x' ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      };
+
+      const newBottleId = generateUuid();
       const newStatus = calculateBottleStatus(quantity, quantity, expiryDate, referenceDate);
 
-      const newBottle: Bottle = {
+      let newBottle: Bottle = {
         id: newBottleId,
         chemicalId: chem.id,
         bottleCode: autoCode,
+        qrId: qrCode ? qrCode.trim() : (bottleCode ? bottleCode.trim() : autoCode),
         lotNumber: lotNumber || `LOT-${new Date().getFullYear()}-${nextNum}`,
         initialVolume: quantity,
         currentVolume: quantity,
@@ -2713,13 +2733,26 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
         notes,
       };
 
-      updatedBottlesList = [newBottle, ...updatedBottlesList];
-      targetBottleId = newBottleId;
-      targetBottleCode = autoCode;
-
-      if (isSupabaseConfigured()) {
-        bottleService.insert(newBottle).catch((err) => console.warn('Supabase bottle insert error:', err));
+      try {
+        const { data: dbBottle, error: dbErr } = await bottleService.insert(newBottle);
+        if (dbBottle) {
+          newBottle = {
+            ...newBottle,
+            id: dbBottle.id,
+            bottleCode: dbBottle.bottleCode,
+            qrId: dbBottle.qrId || newBottle.qrId,
+          };
+        } else if (dbErr) {
+          console.warn('Supabase bottle insert notice:', dbErr);
+        }
+      } catch (err) {
+        console.warn('Supabase bottle insert exception:', err);
       }
+
+      updatedBottlesList = [newBottle, ...updatedBottlesList];
+      targetBottleId = newBottle.id;
+      targetBottleCode = newBottle.bottleCode;
+      createdOrUpdatedBottle = newBottle;
     }
 
     setBottles(updatedBottlesList);
@@ -2819,6 +2852,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       success: true,
       message: `Đã nhập kho thành công chai ${targetBottleCode} (+${quantity} ${unit}). Tổng tồn: ${newTotal} ${chem.primaryUnit}.`,
       bottleId: targetBottleId,
+      bottle: createdOrUpdatedBottle || undefined,
     };
   };
 
@@ -3731,48 +3765,99 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
   // =========================================================================
   // MASTER CHEMICAL CRUD (Manager Only)
   // =========================================================================
-  const addChemical = (chemicalData: Omit<Chemical, 'id'>) => {
+  const addChemical = async (
+    chemicalData: Omit<Chemical, 'id'> & { initialBottle?: any }
+  ): Promise<{ success: boolean; message: string; chemical?: Chemical; bottle?: Bottle }> => {
     if (!isManager) {
       return { success: false, message: 'ACCESS DENIED: Chỉ Quản lý (MANAGER) mới có quyền thêm danh mục hóa chất mới.' };
     }
 
-    const newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `chem-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
-    const newChem: Chemical = {
+    const generateUuid = () => {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    };
+
+    const newId = generateUuid();
+    let newChem: Chemical = {
       ...chemicalData,
       id: newId,
     };
 
-    setChemicals((prev) => [newChem, ...prev]);
-
-    // Initial bottle
-    const initialQty = chemicalData.targetStock || chemicalData.warningStock || 1000;
-    const initialBottleId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `bot-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
-    const initialBottle: Bottle = {
-      id: initialBottleId,
-      chemicalId: newId,
-      bottleCode: `${chemicalData.code ? chemicalData.code.split('-')[0] : 'BOT'}-001`,
-      lotNumber: `LOT-${new Date().getFullYear()}-001`,
-      initialVolume: initialQty,
-      currentVolume: initialQty,
-      unit: chemicalData.primaryUnit,
-      expiryDate: '2028-10-01',
-      receivedDate: new Date().toISOString().split('T')[0],
-      location: chemicalData.storageLocation,
-      status: 'FULL',
-    };
-    setBottles((prev) => [initialBottle, ...prev]);
-
-    if (isSupabaseConfigured()) {
-      chemicalService.insert(newChem).catch((err) => console.warn('Supabase chemical insert error:', err));
-      bottleService.insert(initialBottle).catch((err) => console.warn('Supabase bottle insert error:', err));
+    // 1. First insert chemical into Supabase & await confirmation
+    try {
+      const { data: dbChem, error: chemErr } = await chemicalService.insert(newChem);
+      if (dbChem) {
+        newChem = { ...newChem, id: dbChem.id };
+      } else if (chemErr) {
+        console.warn('Supabase chemical insert notice:', chemErr);
+      }
+    } catch (err) {
+      console.warn('Supabase chemical insert exception:', err);
     }
 
-    logAudit('Thêm hóa chất mới', 'CHEMICAL', newId, `${currentUser.name} đã thêm hóa chất: ${newChem.name}`);
-    return { success: true, message: `Đã thêm hóa chất "${newChem.name}" thành công!`, chemical: newChem };
+    setChemicals((prev) => [newChem, ...prev]);
+
+    // 2. Prepare initial bottle if requested (or default 1st bottle)
+    let finalBottle: Bottle | undefined = undefined;
+    const initialConfig = (chemicalData as any).initialBottle;
+    if (initialConfig !== false) {
+      const initialQty = initialConfig?.quantity
+        ? parseFloat(initialConfig.quantity)
+        : (chemicalData.targetStock || chemicalData.warningStock || 500);
+
+      const codePrefix = chemicalData.code ? chemicalData.code.split('-')[0].trim().toUpperCase() : 'BOT';
+      const autoBottleCode = initialConfig?.bottleCode || `${codePrefix}-001`;
+      const initialBottleId = generateUuid();
+      const initialExpiry = initialConfig?.expiryDate || '2028-10-01';
+
+      let initialBottle: Bottle = {
+        id: initialBottleId,
+        chemicalId: newChem.id,
+        bottleCode: autoBottleCode,
+        qrId: initialConfig?.qrCode || autoBottleCode,
+        lotNumber: initialConfig?.lotNumber || `LOT-${new Date().getFullYear()}-001`,
+        initialVolume: initialQty,
+        currentVolume: initialQty,
+        unit: chemicalData.primaryUnit,
+        expiryDate: initialExpiry,
+        receivedDate: new Date().toISOString().split('T')[0],
+        location: chemicalData.storageLocation,
+        status: 'FULL',
+      };
+
+      try {
+        const { data: dbBottle, error: bottleErr } = await bottleService.insert(initialBottle);
+        if (dbBottle) {
+          initialBottle = {
+            ...initialBottle,
+            id: dbBottle.id,
+            bottleCode: dbBottle.bottleCode,
+            qrId: dbBottle.qrId || initialBottle.qrId,
+          };
+        } else if (bottleErr) {
+          console.warn('Supabase initial bottle insert notice:', bottleErr);
+        }
+      } catch (err) {
+        console.warn('Supabase initial bottle insert exception:', err);
+      }
+
+      setBottles((prev) => [initialBottle, ...prev]);
+      finalBottle = initialBottle;
+    }
+
+    logAudit('Thêm hóa chất mới', 'CHEMICAL', newChem.id, `${currentUser.name} đã thêm hóa chất: ${newChem.name}`);
+    return {
+      success: true,
+      message: `Đã thêm hóa chất "${newChem.name}" thành công!`,
+      chemical: newChem,
+      bottle: finalBottle,
+    };
   };
 
   const updateChemical = (id: string, chemicalUpdate: Partial<Chemical>) => {

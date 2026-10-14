@@ -110,8 +110,11 @@ function MainApp() {
 
   const [stockInOpen, setStockInOpen] = useState(false);
   const [selectedChemForStockIn, setSelectedChemForStockIn] = useState<string | undefined>();
+  const [selectedBottleForStockIn, setSelectedBottleForStockIn] = useState<string | undefined>();
 
   const [addChemicalOpen, setAddChemicalOpen] = useState(false);
+  const [prefilledCodeForAddChemical, setPrefilledCodeForAddChemical] = useState<string | undefined>();
+  const [prefilledDataForAddChemical, setPrefilledDataForAddChemical] = useState<any>(undefined);
   const [excelImportOpen, setExcelImportOpen] = useState(false);
   const [emailAlertsOpen, setEmailAlertsOpen] = useState(false);
   const [discrepancyModalOpen, setDiscrepancyModalOpen] = useState(false);
@@ -573,9 +576,16 @@ function MainApp() {
     setRecordUsageOpen(true);
   };
 
-  const handleOpenStockIn = (chemicalId?: string) => {
+  const handleOpenStockIn = (chemicalId?: string, bottleCode?: string) => {
     setSelectedChemForStockIn(chemicalId);
+    setSelectedBottleForStockIn(bottleCode);
     setStockInOpen(true);
+  };
+
+  const handleOpenAddChemical = (prefilledCode?: string, prefilledData?: any) => {
+    setPrefilledCodeForAddChemical(prefilledCode);
+    setPrefilledDataForAddChemical(prefilledData);
+    setAddChemicalOpen(true);
   };
 
   const handleOpenDeleteChemical = (chem: Chemical) => {
@@ -901,8 +911,8 @@ function MainApp() {
         onClose={() => setQrScannerOpen(false)}
         onBottleIdentified={handleOpenBottleDetail}
         onOpenRecordUsage={(chemicalId, bottleId) => handleOpenRecordUsage(chemicalId, bottleId)}
-        onOpenStockIn={(chemicalId) => handleOpenStockIn(chemicalId)}
-        onOpenAddChemical={() => setAddChemicalOpen(true)}
+        onOpenStockIn={(chemicalId, bottleCode) => handleOpenStockIn(chemicalId, bottleCode)}
+        onOpenAddChemical={(code, data) => handleOpenAddChemical(code, data)}
       />
 
       <ArchiveCenterModal
@@ -926,13 +936,24 @@ function MainApp() {
 
       <StockInModal
         isOpen={stockInOpen}
-        onClose={() => setStockInOpen(false)}
+        onClose={() => {
+          setStockInOpen(false);
+          setSelectedChemForStockIn(undefined);
+          setSelectedBottleForStockIn(undefined);
+        }}
         preselectedChemicalId={selectedChemForStockIn}
+        preselectedBottleCode={selectedBottleForStockIn}
       />
 
       <AddChemicalModal
         isOpen={addChemicalOpen}
-        onClose={() => setAddChemicalOpen(false)}
+        onClose={() => {
+          setAddChemicalOpen(false);
+          setPrefilledCodeForAddChemical(undefined);
+          setPrefilledDataForAddChemical(undefined);
+        }}
+        prefilledCode={prefilledCodeForAddChemical}
+        prefilledData={prefilledDataForAddChemical}
       />
 
       <BottleDetailModal

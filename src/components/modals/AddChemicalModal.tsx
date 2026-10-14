@@ -8,6 +8,19 @@ import { CabinetManagementModal } from './CabinetManagementModal';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  prefilledCode?: string;
+  prefilledData?: {
+    name?: string;
+    englishName?: string;
+    casNumber?: string;
+    category?: ChemicalCategory;
+    grade?: ChemicalGrade;
+    volume?: number;
+    unit?: ChemicalUnit;
+    lotNumber?: string;
+    expiryDate?: string;
+    manufacturer?: string;
+  };
 }
 
 const CATEGORIES: ChemicalCategory[] = [
@@ -46,8 +59,13 @@ const GHS_OPTIONS: { id: GHSPictogram; label: string; icon: string }[] = [
   { id: 'explosive', label: 'Chất nổ', icon: '💥' },
 ];
 
-export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { addChemical, stockIn, currentUser, storageCabinets } = useLab();
+export const AddChemicalModal: React.FC<Props> = ({
+  isOpen,
+  onClose,
+  prefilledCode,
+  prefilledData,
+}) => {
+  const { addChemical, currentUser, storageCabinets } = useLab();
 
   const [name, setName] = useState('');
   const [englishName, setEnglishName] = useState('');
@@ -75,6 +93,38 @@ export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [responsiblePerson, setResponsiblePerson] = useState(currentUser.name);
   const [notes, setNotes] = useState('');
 
+  // Initial bottle creation
+  const [createInitialBottle, setCreateInitialBottle] = useState(true);
+  const [initialVolume, setInitialVolume] = useState('500');
+  const [lotNumber, setLotNumber] = useState('LOT-2026-INIT');
+  const [expiryDate, setExpiryDate] = useState('2028-10-01');
+
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Sync prefilled data from QR Scanner
+  React.useEffect(() => {
+    if (isOpen) {
+      if (prefilledCode) {
+        setCode(prefilledCode);
+        setCatalogNumber(prefilledCode);
+      }
+      if (prefilledData) {
+        if (prefilledData.name) setName(prefilledData.name);
+        if (prefilledData.englishName) setEnglishName(prefilledData.englishName);
+        if (prefilledData.casNumber) setCasNumber(prefilledData.casNumber);
+        if (prefilledData.category) setCategory(prefilledData.category);
+        if (prefilledData.grade) setGrade(prefilledData.grade);
+        if (prefilledData.volume) setInitialVolume(String(prefilledData.volume));
+        if (prefilledData.unit) setPrimaryUnit(prefilledData.unit);
+        if (prefilledData.lotNumber) setLotNumber(prefilledData.lotNumber);
+        if (prefilledData.expiryDate) setExpiryDate(prefilledData.expiryDate);
+        if (prefilledData.manufacturer) setManufacturer(prefilledData.manufacturer);
+      }
+    }
+  }, [isOpen, prefilledCode, prefilledData]);
+
   const activeCabinetObj = storageCabinets.find(
     (c) => c.name.toLowerCase() === cabinet.toLowerCase() || c.id === cabinet
   );
@@ -92,15 +142,6 @@ export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Initial bottle creation
-  const [createInitialBottle, setCreateInitialBottle] = useState(true);
-  const [initialVolume, setInitialVolume] = useState('500');
-  const [lotNumber, setLotNumber] = useState('LOT-2026-INIT');
-  const [expiryDate, setExpiryDate] = useState('2028-10-01');
-
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
   if (!isOpen) return null;
 
   const toggleGHS = (id: GHSPictogram) => {
@@ -109,7 +150,7 @@ export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -119,65 +160,67 @@ export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
       return;
     }
 
-    const res = addChemical({
-      code: code.trim() || name.substring(0, 3).toUpperCase(),
-      name: name.trim(),
-      englishName: englishName.trim() || name.trim(),
-      casNumber: casNumber.trim() || 'N/A',
-      chemicalFormula: chemicalFormula.trim(),
-      molecularWeight: molecularWeight ? parseFloat(molecularWeight) : undefined,
-      grade,
-      category,
-      physicalForm,
-      primaryUnit,
-      manufacturer: manufacturer.trim() || 'Standard Lab Supply',
-      catalogNumber: catalogNumber.trim() || undefined,
-      minimumStock: parseFloat(minimumStock) || 1,
-      warningStock: parseFloat(warningStock) || 2,
-      targetStock: parseFloat(targetStock) || 5,
-      unitPrice: 0,
-      storageLocation: {
-        building,
-        room,
-        cabinet,
-        shelf,
-      },
-      storageConditions,
-      safetyInfo: {
-        ghsPictograms: selectedGHS,
-        hazardClass: selectedGHS.length > 0 ? selectedGHS.join(', ') : 'Chưa phân loại',
-        ppe: ppe.split(',').map((s) => s.trim()).filter(Boolean),
-        incompatibilities: 'Tránh nhiệt độ cao và độ ẩm',
-      },
-      responsiblePerson: responsiblePerson.trim() || currentUser.name,
-      notes: notes.trim(),
-      isDemo: false,
-    });
-
-    if (!res.success) {
-      setErrorMsg(res.message);
-      return;
-    }
-
-    // Optionally create the initial bottle right away
-    if (createInitialBottle && res.chemical) {
-      stockIn({
-        chemicalId: res.chemical.id,
-        lotNumber: lotNumber.trim() || 'LOT-INIT',
-        quantity: parseFloat(initialVolume) || 1,
-        unit: primaryUnit,
-        supplier: manufacturer || 'Ban đầu',
-        expiryDate: expiryDate || '2028-10-01',
-        storageLocation: { building, room, cabinet, shelf },
-        notes: 'Chai ban đầu tạo cùng danh mục',
+    setIsSubmitting(true);
+    try {
+      const res = await addChemical({
+        code: code.trim() || name.substring(0, 3).toUpperCase(),
+        name: name.trim(),
+        englishName: englishName.trim() || name.trim(),
+        casNumber: casNumber.trim() || 'N/A',
+        chemicalFormula: chemicalFormula.trim(),
+        molecularWeight: molecularWeight ? parseFloat(molecularWeight) : undefined,
+        grade,
+        category,
+        physicalForm,
+        primaryUnit,
+        manufacturer: manufacturer.trim() || 'Standard Lab Supply',
+        catalogNumber: catalogNumber.trim() || undefined,
+        minimumStock: parseFloat(minimumStock) || 1,
+        warningStock: parseFloat(warningStock) || 2,
+        targetStock: parseFloat(targetStock) || 5,
+        unitPrice: 0,
+        storageLocation: {
+          building,
+          room,
+          cabinet,
+          shelf,
+        },
+        storageConditions,
+        safetyInfo: {
+          ghsPictograms: selectedGHS,
+          hazardClass: selectedGHS.length > 0 ? selectedGHS.join(', ') : 'Chưa phân loại',
+          ppe: ppe.split(',').map((s) => s.trim()).filter(Boolean),
+          incompatibilities: 'Tránh nhiệt độ cao và độ ẩm',
+        },
+        responsiblePerson: responsiblePerson.trim() || currentUser.name,
+        notes: notes.trim(),
+        isDemo: false,
+        initialBottle: createInitialBottle
+          ? {
+              quantity: parseFloat(initialVolume) || 500,
+              lotNumber: lotNumber.trim() || 'LOT-INIT',
+              expiryDate: expiryDate || '2028-10-01',
+              bottleCode: code ? `${code.trim().split('-')[0]}-001` : undefined,
+              qrCode: prefilledCode || undefined,
+            }
+          : false,
       });
-    }
 
-    setSuccessMsg('Đã tạo hóa chất thành công!');
-    setTimeout(() => {
-      setSuccessMsg(null);
-      onClose();
-    }, 1200);
+      if (!res.success) {
+        setErrorMsg(res.message);
+        return;
+      }
+
+      setSuccessMsg('Đã tạo hóa chất & lưu vào Supabase thành công!');
+      setTimeout(() => {
+        setSuccessMsg(null);
+        onClose();
+      }, 1200);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi khi thêm hóa chất vào cơ sở dữ liệu.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -551,9 +594,10 @@ export const AddChemicalModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs"
+              disabled={isSubmitting}
+              className="px-5 py-2 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
             >
-              Tạo Hóa Chất Mới
+              <span>{isSubmitting ? 'Đang lưu vào Supabase...' : 'Tạo Hóa Chất Mới'}</span>
             </button>
           </div>
         </form>
