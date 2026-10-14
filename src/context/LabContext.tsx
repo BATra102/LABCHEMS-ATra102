@@ -714,6 +714,14 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       if (userRes.data && !userRes.error && userRes.data.length > 0) {
         setUsers(userRes.data);
+        const me = userRes.data.find((u) => u.id === currentUser.id);
+        if (me) {
+          setCurrentUser((prev) => ({
+            ...prev,
+            ...me,
+            must_change_password: Boolean(me.must_change_password),
+          }));
+        }
       } else {
         await refreshUsers();
       }
@@ -1623,6 +1631,7 @@ Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       status: userData.status || 'ACTIVE',
       dateJoined: userData.dateJoined || new Date().toISOString().split('T')[0],
       lastLogin: new Date().toISOString(),
+      must_change_password: true,
     };
     setUsers((prev) => [...prev, newUser]);
     logAudit('Thêm người dùng', 'USER', newId, `${currentUser.name} đã thêm thành viên: ${newUser.name} (${newUser.role}, ${newUser.department})`);

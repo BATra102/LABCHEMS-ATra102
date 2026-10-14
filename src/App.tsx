@@ -368,7 +368,7 @@ function MainApp() {
               role: meta.role || 'STAFF',
               status: 'ACTIVE',
               department: meta.department || 'Bộ môn Dược liệu & Chiết xuất',
-              must_change_password: true,
+              must_change_password: meta.must_change_password !== undefined ? Boolean(meta.must_change_password) : false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };

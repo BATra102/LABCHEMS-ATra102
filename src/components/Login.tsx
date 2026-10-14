@@ -364,7 +364,7 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, className = '', initial
           role: userMeta.role || 'STAFF',
           status: 'ACTIVE',
           department: userMeta.department || 'Bộ môn Dược liệu & Chiết xuất',
-          must_change_password: true,
+          must_change_password: userMeta.must_change_password !== undefined ? Boolean(userMeta.must_change_password) : false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };

@@ -253,6 +253,7 @@ export const userService = {
         status: params.status || 'ACTIVE',
         department: params.department || 'Bộ môn Dược liệu & Chiết xuất',
         dateJoined: new Date().toISOString().split('T')[0],
+        must_change_password: true,
       };
 
       await auditService.log({

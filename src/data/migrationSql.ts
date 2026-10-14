@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     "viewReports": false,
     "manageUsers": false
   }'::jsonb,
+  must_change_password BOOLEAN NOT NULL DEFAULT false,
   last_login_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -97,10 +98,14 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   deletion_reason TEXT
 );
 
+-- Bảo đảm cột must_change_password luôn tồn tại cho các database đã tạo từ trước (mặc định false cho tài khoản cũ)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles (email);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles (role);
 CREATE INDEX IF NOT EXISTS idx_profiles_status ON public.profiles (status);
 CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles (department_id);
+CREATE INDEX IF NOT EXISTS idx_profiles_must_change_password ON public.profiles (must_change_password);
 
 -- ====================================================================
 -- SECTION 5: TABLE: chemicals
@@ -425,6 +430,31 @@ BEGIN
   RETURN public.update_own_profile(p_full_name, p_avatar_url, p_phone, p_job_title, p_notes);
 END;
 $$;
+
+-- Dedicated safe SECURITY DEFINER RPC to mark must_change_password = false
+CREATE OR REPLACE FUNCTION public.complete_first_time_password_change()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_user_id UUID;
+BEGIN
+  v_user_id := auth.uid();
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Yêu cầu đăng nhập xác thực để cập nhật trạng thái mật khẩu (auth.uid() is null)';
+  END IF;
+
+  UPDATE public.profiles
+  SET
+    must_change_password = false,
+    updated_at = now()
+  WHERE id = v_user_id;
+
+  RETURN jsonb_build_object('success', true, 'message', 'Đổi mật khẩu lần đầu thành công');
+END;
+$$;
+
 
 -- ====================================================================
 -- SECTION 13: ATOMIC FUNCTION record_bottle_usage() (BẢO MẬT TUYỆT ĐỐI)

@@ -214,6 +214,194 @@ async function startServer() {
   });
 
   /**
+   * POST /api/complete-password-change
+   * Endpoint đổi mật khẩu lần đầu hoặc đổi mật khẩu bắt buộc cho người dùng
+   * Xác thực Bearer token của chính user, cập nhật Auth và bảng public.profiles
+   */
+  app.post('/api/complete-password-change', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+          success: false,
+          message: 'Yêu cầu token xác thực hợp lệ (Authorization: Bearer <token>).',
+        });
+      }
+
+      const token = authHeader.split(' ')[1];
+      const { newPassword } = req.body || {};
+
+      const supabaseUrl =
+        process.env.VITE_SUPABASE_URL ||
+        process.env.SUPABASE_URL ||
+        'https://hlkprapotgvtmqqnwddx.supabase.co';
+      const supabaseAnonKey =
+        process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        'sb_publishable_PXjojb0c7TTWSwM_U2W-0Q_5ACU8V07';
+      const supabaseServiceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SECRET_KEY ||
+        process.env.SERVICE_ROLE_KEY ||
+        '';
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        return res.status(500).json({
+          success: false,
+          message: 'Supabase chưa được cấu hình trên server.',
+        });
+      }
+
+      // 1. Xác thực danh tính caller qua Bearer token
+      const clientWithToken = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      const {
+        data: { user: authUser },
+        error: authErr,
+      } = await clientWithToken.auth.getUser(token);
+
+      if (authErr || !authUser) {
+        return res.status(401).json({
+          success: false,
+          message: 'Phiên làm việc không hợp lệ hoặc đã hết hạn.',
+        });
+      }
+
+      const userId = authUser.id;
+
+      // 2. Nếu newPassword được truyền lên, cập nhật mật khẩu Supabase Auth
+      if (newPassword) {
+        if (typeof newPassword !== 'string' || newPassword.length < 6) {
+          return res.status(400).json({
+            success: false,
+            message: 'Mật khẩu mới phải có tối thiểu 6 ký tự.',
+          });
+        }
+
+        const isSbSecret = supabaseServiceKey.startsWith('sb_secret_');
+        let adminClient: any = null;
+        if (supabaseServiceKey && !isSbSecret) {
+          try {
+            adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+              auth: { autoRefreshToken: false, persistSession: false },
+            });
+          } catch (_) {}
+        }
+
+        if (adminClient) {
+          const { error: updErr } = await adminClient.auth.admin.updateUserById(userId, {
+            password: newPassword,
+            user_metadata: {
+              ...(authUser.user_metadata || {}),
+              must_change_password: false,
+            },
+          });
+          if (updErr) {
+            console.warn('Server admin updateUserById notice:', updErr);
+            await clientWithToken.auth.updateUser({
+              password: newPassword,
+              data: { must_change_password: false },
+            });
+          }
+        } else {
+          const { error: updErr } = await clientWithToken.auth.updateUser({
+            password: newPassword,
+            data: { must_change_password: false },
+          });
+          if (updErr) {
+            return res.status(400).json({
+              success: false,
+              message: `Lỗi cập nhật mật khẩu: ${updErr.message}`,
+            });
+          }
+        }
+      }
+
+      // 3. Cập nhật bền vững must_change_password = false trong bảng profiles
+      const isSbSecret = supabaseServiceKey.startsWith('sb_secret_');
+      let profileUpdated = false;
+
+      if (supabaseServiceKey && !isSbSecret) {
+        try {
+          const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+          const { error: pErr } = await adminClient
+            .from('profiles')
+            .update({
+              must_change_password: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+          if (!pErr) profileUpdated = true;
+        } catch (_) {}
+      }
+
+      if (!profileUpdated) {
+        try {
+          const { error: rpcErr } = await clientWithToken.rpc('complete_first_time_password_change');
+          if (!rpcErr) profileUpdated = true;
+        } catch (_) {}
+      }
+
+      if (!profileUpdated) {
+        try {
+          const { error: pErr } = await clientWithToken
+            .from('profiles')
+            .update({
+              must_change_password: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+          if (!pErr) profileUpdated = true;
+        } catch (_) {}
+      }
+
+      // Cập nhật serverProfilesStore in-memory cache
+      if (serverProfilesStore.has(userId)) {
+        const item = serverProfilesStore.get(userId);
+        item.must_change_password = false;
+        serverProfilesStore.set(userId, item);
+      }
+
+      // 4. Ghi Audit Log (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
+      try {
+        await clientWithToken.from('audit_logs').insert({
+          action: 'PASSWORD_RESET',
+          entity_type: 'USER',
+          entity_id: userId,
+          actor_name: authUser.user_metadata?.full_name || authUser.email || 'Người dùng',
+          actor_user_id: userId,
+          user_id: userId,
+          description: `Thành viên (${authUser.email}) đã đổi mật khẩu lần đầu thành công.`,
+          new_data: {
+            must_change_password: false,
+            changed_at: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
+      return res.status(200).json({
+        success: true,
+        must_change_password: false,
+        message: 'Đổi mật khẩu thành công. Trạng thái đã được cập nhật bền vững trong cơ sở dữ liệu.',
+      });
+    } catch (err: any) {
+      console.error('API /api/complete-password-change error:', err);
+      return res.status(500).json({
+        success: false,
+        message: err.message || 'Lỗi server khi hoàn tất đổi mật khẩu.',
+      });
+    }
+  });
+
+
+  /**
    * POST /api/login-with-username
    * Xác thực đăng nhập bằng Tên đăng nhập (Username) + Mật khẩu
    */

@@ -62,36 +62,73 @@ export const MustChangePasswordView: React.FC<Props> = ({ onPasswordChanged }) =
     setIsLoading(true);
 
     try {
-      // 1. Cập nhật mật khẩu trong Supabase Auth cho user hiện tại
+      // 1. Cập nhật mật khẩu trong Supabase Auth cho user hiện tại kèm user_metadata
       const { error: authError } = await supabase.auth.updateUser({
         password: newPassword,
+        data: {
+          must_change_password: false,
+        },
       });
 
       if (authError) {
         throw authError;
       }
 
-      // 2. Cập nhật trạng thái must_change_password = false trong bảng profiles
-      await supabase
-        .from('profiles')
-        .update({
-          must_change_password: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', currentUser.id);
+      // 2. Lấy session token để gọi Serverless API /api/complete-password-change
+      // Đảm bảo cập nhật cơ sở dữ liệu Supabase phía máy chủ (vượt qua hạn chế RLS)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      // 3. Ghi audit log (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
-      await auditService.log({
-        action: 'PASSWORD_RESET',
-        entityType: 'USER',
-        entityId: currentUser.id,
-        actorId: currentUser.id,
-        actorName: currentUser.name,
-        description: `Thành viên ${currentUser.name} (${currentUser.email}) đã đổi mật khẩu lần đầu thành công.`,
-        newData: { must_change_password: false, changedAt: new Date().toISOString() },
-      });
+      if (token) {
+        try {
+          const apiRes = await fetch('/api/complete-password-change', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ newPassword }),
+          });
+          if (!apiRes.ok) {
+            console.warn('API /api/complete-password-change returned non-200 status:', apiRes.status);
+          }
+        } catch (apiErr) {
+          console.warn('Call /api/complete-password-change error:', apiErr);
+        }
+      }
 
-      // 4. Cập nhật state nội bộ
+      // 3. Fallback: Gọi RPC complete_first_time_password_change (SECURITY DEFINER)
+      try {
+        await supabase.rpc('complete_first_time_password_change');
+      } catch (_) {}
+
+      // 4. Fallback: Cập nhật trực tiếp bảng profiles
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            must_change_password: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', currentUser.id);
+      } catch (_) {}
+
+      // 5. Ghi audit log (TUYỆT ĐỐI KHÔNG GHI MẬT KHẨU)
+      try {
+        await auditService.log({
+          action: 'PASSWORD_RESET',
+          entityType: 'USER',
+          entityId: currentUser.id,
+          actorId: currentUser.id,
+          actorName: currentUser.name,
+          description: `Thành viên ${currentUser.name} (${currentUser.email}) đã đổi mật khẩu lần đầu thành công.`,
+          newData: { must_change_password: false, changedAt: new Date().toISOString() },
+        });
+      } catch (_) {}
+
+      // 6. Cập nhật state nội bộ React
       setCurrentUser({
         ...currentUser,
         must_change_password: false,
@@ -100,7 +137,7 @@ export const MustChangePasswordView: React.FC<Props> = ({ onPasswordChanged }) =
       setSuccessMessage('Đổi mật khẩu thành công! Đang chuyển hướng vào hệ thống...');
       setTimeout(() => {
         onPasswordChanged();
-      }, 1000);
+      }, 800);
     } catch (err: any) {
       console.error('Error changing password:', err);
       setErrorMessage(err.message || 'Không thể đổi mật khẩu. Vui lòng thử lại.');

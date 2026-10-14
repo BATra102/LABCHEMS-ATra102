@@ -208,6 +208,7 @@ export default async function handler(req: any, res: any) {
         full_name: trimmedName,
         role: requestedRole,
         department: requestedDept,
+        must_change_password: true,
       },
     });
 
@@ -235,6 +236,7 @@ export default async function handler(req: any, res: any) {
             full_name: trimmedName,
             role: requestedRole,
             department: requestedDept,
+            must_change_password: true,
           },
         });
       } else {

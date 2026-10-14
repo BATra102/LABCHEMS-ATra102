@@ -162,6 +162,9 @@ export default async function handler(req: any, res: any) {
 
     const { error: updErr } = await adminClient.auth.admin.updateUserById(targetUserId, {
       password: newPassword,
+      user_metadata: {
+        must_change_password: true,
+      },
     });
 
     if (updErr) {
@@ -171,7 +174,17 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 6. Đặt cờ must_change_password = true trong bảng profiles bằng clientWithToken
+    // 6. Đặt cờ must_change_password = true trong bảng profiles bằng adminClient và clientWithToken
+    try {
+      await adminClient
+        .from('profiles')
+        .update({
+          must_change_password: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', targetUserId);
+    } catch (_) {}
+
     try {
       await clientWithToken
         .from('profiles')
