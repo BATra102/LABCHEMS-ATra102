@@ -1215,6 +1215,20 @@ async function startServer() {
     }
   });
 
+  /**
+   * POST /api/record-usage
+   * Ghi nhận sử dụng hóa chất và trừ tồn kho an toàn
+   */
+  app.all('/api/record-usage', async (req, res) => {
+    try {
+      const handler = (await import('./api/record-usage')).default;
+      return handler(req, res);
+    } catch (err: any) {
+      console.error('Server error dispatching /api/record-usage:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Lỗi máy chủ khi ghi nhận sử dụng.' });
+    }
+  });
+
 
   // Tích hợp Vite middleware trong môi trường dev hoặc phục vụ file tĩnh trong production
   if (process.env.NODE_ENV === 'production') {

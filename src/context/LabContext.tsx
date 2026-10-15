@@ -4703,6 +4703,26 @@ LabChem - Hệ thống quản lý hóa chất phòng thí nghiệm.`;
       `${currentUser.name} đã nhập ${newBottlesCount} chai hóa chất (${newChemicalsCount} hóa chất mới, ${updatedChemicalsCount} cập nhật, ${skippedRowsCount} bỏ qua) từ biểu mẫu chuẩn.`
     );
 
+    // Async background sync to Supabase if configured
+    if (isSupabaseConfigured()) {
+      (async () => {
+        try {
+          if (newChemicalsCount > 0) {
+            for (const chem of newChemicals.slice(-newChemicalsCount)) {
+              await chemicalService.insert(chem).catch((err) => console.warn('Supabase chem import sync error:', err));
+            }
+          }
+          if (newBottlesCount > 0) {
+            for (const bot of newBottles.slice(-newBottlesCount)) {
+              await bottleService.insert(bot).catch((err) => console.warn('Supabase bottle import sync error:', err));
+            }
+          }
+        } catch (e) {
+          console.warn('Supabase batch import sync error:', e);
+        }
+      })();
+    }
+
     return {
       success: true,
       message: `Nhập kho thành công! Đã tạo ${newBottlesCount} chai hóa chất (${newChemicalsCount} hóa chất mới tạo, ${updatedChemicalsCount} hóa chất liên kết/cập nhật).`,

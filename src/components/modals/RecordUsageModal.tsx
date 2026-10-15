@@ -96,6 +96,7 @@ export const RecordUsageModal: React.FC<Props> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [approvalSentMsg, setApprovalSentMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Camera & QR Scanner State
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -479,6 +480,7 @@ export const RecordUsageModal: React.FC<Props> = ({
   // Reset when dialog opens
   useEffect(() => {
     if (isOpen) {
+      setIsSubmitting(false);
       setUseFullBottle(Boolean(initialUseFullBottle));
       setEmptyBottleAction('EMPTY');
       setErrorMsg(null);
@@ -523,6 +525,8 @@ export const RecordUsageModal: React.FC<Props> = ({
   // Submit Usage Transaction (Requirement 13)
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setErrorMsg(null);
     setSuccessMsg(null);
 
@@ -542,6 +546,8 @@ export const RecordUsageModal: React.FC<Props> = ({
       }
       return;
     }
+
+    setIsSubmitting(true);
 
     const finalPurpose = selectedPurpose === 'Khác' ? customPurpose.trim() : selectedPurpose;
 
@@ -563,6 +569,7 @@ export const RecordUsageModal: React.FC<Props> = ({
     });
 
     if (!res.success) {
+      setIsSubmitting(false);
       setErrorMsg(res.message);
     } else {
       setSuccessMsg(res.message);
@@ -578,6 +585,7 @@ export const RecordUsageModal: React.FC<Props> = ({
       }
 
       setTimeout(() => {
+        setIsSubmitting(false);
         setSuccessMsg(null);
         onClose();
       }, 1200);
@@ -1367,17 +1375,26 @@ export const RecordUsageModal: React.FC<Props> = ({
 
             <button
               type="submit"
-              disabled={hasBlocker}
+              disabled={hasBlocker || isSubmitting}
               className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer ${
-                hasBlocker
+                hasBlocker || isSubmitting
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60'
                   : useFullBottle
                   ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-200'
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200'
               }`}
             >
-              <Check className="w-4 h-4" />
-              <span>{useFullBottle ? 'Xác nhận dùng hết 1 chai' : 'Xác nhận ghi sử dụng'}</span>
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Đang xử lý...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>{useFullBottle ? 'Xác nhận dùng hết 1 chai' : 'Xác nhận ghi sử dụng'}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

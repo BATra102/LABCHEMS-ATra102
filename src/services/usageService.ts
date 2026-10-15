@@ -52,11 +52,55 @@ export const usageService = {
     }
 
     try {
+      // 1. Try server-side atomic API first (handles row locks, permissions, and audit logs)
+      try {
+        let authToken: string | undefined = undefined;
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          authToken = sessionData?.session?.access_token;
+        } catch (_) {}
+
+        const response = await fetch('/api/record-usage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({
+            bottleId: params.bottleId,
+            quantityUsed: params.quantityUsed,
+            userId: params.userId,
+            userName: params.userName,
+            chemicalId: params.chemicalId,
+            chemicalName: params.chemicalName,
+            purpose: params.purpose,
+            project: params.projectName,
+            notes: params.notes,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json.success) {
+            return { success: true, data: json };
+          }
+        } else {
+          const errJson = await response.json().catch(() => null);
+          if (errJson && errJson.message) {
+            return { success: false, error: new Error(errJson.message) };
+          }
+        }
+      } catch (apiErr: any) {
+        if (apiErr && apiErr.message && !apiErr.message.toLowerCase().includes('fetch')) {
+          return { success: false, error: apiErr };
+        }
+      }
+
       // Ensure p_user_id matches authenticated session uid
       const { data: authUser } = await supabase.auth.getUser();
       const sessionUserId = authUser?.user?.id || params.userId;
 
-      // 1. Try atomic PostgreSQL RPC first
+      // 2. Try atomic PostgreSQL RPC
       const { data, error } = await supabase.rpc('record_bottle_usage', {
         p_bottle_id: params.bottleId,
         p_quantity: params.quantityUsed,
