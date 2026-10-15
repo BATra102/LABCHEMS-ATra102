@@ -33,6 +33,7 @@ import {
   QrCode,
   Tag,
   AlertTriangle,
+  Flashlight,
 } from 'lucide-react';
 
 export interface BarcodeCartItem {
@@ -106,8 +107,13 @@ export const SupermarketBarcodeModal: React.FC<Props> = ({
   const [unknownCode, setUnknownCode] = useState<string | null>(null);
 
   // Camera scanner states
+  const [showCamera, setShowCamera] = useState<boolean>(false);
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
+  const [hasTorch, setHasTorch] = useState<boolean>(false);
+  const [torchOn, setTorchOn] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -409,37 +415,101 @@ export const SupermarketBarcodeModal: React.FC<Props> = ({
    * Camera Barcode & QR Scanner
    */
   const startCamera = async () => {
+    setShowCamera(true);
     setCameraError(null);
+    setPermissionDenied(false);
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError('Trình duyệt không hỗ trợ truy cập camera trực tiếp. Bạn có thể sử dụng đầu đọc mã vạch USB hoặc nhập mã bên trên.');
+      return;
+    }
+
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraError('Trình duyệt không hỗ trợ truy cập camera.');
-        return;
+      let stream: MediaStream;
+      // Tier 1: Try ideal environment camera
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
+        });
+      } catch (err1) {
+        // Tier 2: Try facingMode string directly
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode },
+          });
+        } catch (err2) {
+          // Tier 3: Fallback to generic video (webcam, laptop, iOS Safari strict)
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        }
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
-
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+
+      const attachAndPlay = async () => {
+        const video = videoRef.current;
+        if (!video) return false;
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('muted', 'true');
+        video.playsInline = true;
+        (video as any).webkitPlaysInline = true;
+        video.muted = true;
+        video.autoplay = true;
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn('Video play interrupted:', playErr);
+        }
+
         setCameraActive(true);
-        requestAnimationFrame(scanVideoFrame);
+
+        const track = stream.getVideoTracks()[0];
+        const capabilities: any = track && track.getCapabilities ? track.getCapabilities() : {};
+        setHasTorch(Boolean(capabilities && capabilities.torch));
+
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+        }
+        animFrameRef.current = requestAnimationFrame(scanVideoFrame);
+        return true;
+      };
+
+      if (!(await attachAndPlay())) {
+        setTimeout(attachAndPlay, 50);
       }
     } catch (err: any) {
       console.warn('Lỗi mở camera:', err);
-      setCameraError('Không thể mở camera. Bạn có thể sử dụng đầu đọc mã vạch USB hoặc nhập mã bên trên.');
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setPermissionDenied(true);
+        setCameraError('Bạn chưa cấp quyền máy ảnh trong trình duyệt. Nhấn "Cho phép camera / Thử lại" để kích hoạt.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setCameraError('Không tìm thấy thiết bị camera trên máy này. Bạn có thể sử dụng đầu đọc mã vạch USB hoặc nhập mã bên trên.');
+      } else {
+        setCameraError(`Không thể khởi động camera (${err.message || 'Lỗi thiết bị'}). Vui lòng thử lại.`);
+      }
       setCameraActive(false);
     }
   };
 
   const stopCamera = () => {
+    setShowCamera(false);
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -452,6 +522,23 @@ export const SupermarketBarcodeModal: React.FC<Props> = ({
       videoRef.current.srcObject = null;
     }
     setCameraActive(false);
+    setTorchOn(false);
+    setHasTorch(false);
+  };
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const nextTorch = !torchOn;
+      await (track as any).applyConstraints({
+        advanced: [{ torch: nextTorch } as any],
+      });
+      setTorchOn(nextTorch);
+    } catch (err) {
+      console.warn('Torch not supported or failed:', err);
+    }
   };
 
   const scanVideoFrame = async () => {
@@ -756,20 +843,20 @@ export const SupermarketBarcodeModal: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => {
-                if (cameraActive) {
+                if (showCamera) {
                   stopCamera();
                 } else {
                   startCamera();
                 }
               }}
-              className={`px-3.5 py-2.5 text-xs font-semibold rounded-xl border transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                cameraActive
-                  ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
-                  : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm ${
+                showCamera
+                  ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 shadow-rose-100'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-emerald-200'
               }`}
             >
               <Camera className="w-4 h-4" />
-              <span>{cameraActive ? 'Tắt Camera' : 'Camera Quét'}</span>
+              <span>{showCamera ? 'Tắt Camera' : 'Camera Quét'}</span>
             </button>
             <button
               type="button"
@@ -783,24 +870,99 @@ export const SupermarketBarcodeModal: React.FC<Props> = ({
           </form>
 
           {/* Camera Viewfinder */}
-          {cameraActive && (
-            <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-16/9 max-h-64 mx-auto flex items-center justify-center animate-in fade-in">
-              <video ref={videoRef} className="w-full h-full object-cover" />
+          {showCamera && (
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-16/9 max-h-72 mx-auto flex items-center justify-center animate-in fade-in shadow-xl">
+              <video
+                ref={videoRef}
+                playsInline
+                autoPlay
+                muted
+                className={`w-full h-full object-cover transition-opacity duration-300 ${
+                  cameraActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}
+              />
               <canvas ref={canvasRef} className="hidden" />
 
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-36 border-2 border-emerald-400/80 rounded-xl relative overflow-hidden shadow-lg shadow-emerald-500/10">
-                  <div className="absolute inset-x-0 h-0.5 bg-emerald-400 shadow-md shadow-emerald-400 animate-pulse top-1/2 -translate-y-1/2" />
-                  <div className="absolute top-1 left-2 text-[10px] font-mono text-emerald-300 font-bold bg-slate-950/70 px-1 rounded flex items-center gap-1">
-                    <QrCode className="w-3 h-3 text-emerald-400" />
-                    <span>Đang tìm mã vạch & QR...</span>
+              {!cameraActive && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-slate-950/95 text-white z-10">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-2">
+                    <Camera className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <h4 className="text-xs font-bold text-white">
+                    {permissionDenied ? 'Yêu cầu quyền truy cập camera' : cameraError ? 'Không thể mở camera' : 'Đang kết nối camera...'}
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-xs leading-relaxed">
+                    {permissionDenied
+                      ? 'Vui lòng nhấn nút "Cho phép camera / Thử lại" bên dưới để trình duyệt kích hoạt quyền máy ảnh.'
+                      : cameraError || 'Đang kết nối ống kính camera...'}
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      className="px-3.5 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl transition-all shadow-sm cursor-pointer"
+                    >
+                      Cho phép camera / Thử lại
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="px-3.5 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Đóng camera
+                    </button>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {cameraActive && (
+                <>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-64 h-36 border-2 border-emerald-400/80 rounded-xl relative overflow-hidden shadow-lg shadow-emerald-500/10">
+                      <div className="absolute inset-x-0 h-0.5 bg-emerald-400 shadow-md shadow-emerald-400 animate-pulse top-1/2 -translate-y-1/2" />
+                      <div className="absolute top-1 left-2 text-[10px] font-mono text-emerald-300 font-bold bg-slate-950/70 px-1 rounded flex items-center gap-1">
+                        <QrCode className="w-3 h-3 text-emerald-400" />
+                        <span>Đang quét mã vạch & QR...</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
+                    {hasTorch && (
+                      <button
+                        type="button"
+                        onClick={toggleTorch}
+                        className={`p-1.5 rounded-lg text-xs font-semibold backdrop-blur-md transition-colors cursor-pointer ${
+                          torchOn ? 'bg-amber-500 text-white' : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800'
+                        }`}
+                        title="Bật/Tắt đèn Flash"
+                      >
+                        <Flashlight className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))}
+                      className="p-1.5 rounded-lg text-xs font-semibold bg-slate-900/80 text-slate-300 hover:bg-slate-800 backdrop-blur-md transition-colors cursor-pointer"
+                      title="Đổi camera trước/sau"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="p-1.5 rounded-lg text-xs font-semibold bg-slate-900/80 text-rose-300 hover:bg-slate-800 backdrop-blur-md transition-colors cursor-pointer"
+                      title="Tắt Camera"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {cameraError && (
+          {cameraError && !showCamera && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{cameraError}</span>

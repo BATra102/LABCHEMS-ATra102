@@ -296,7 +296,8 @@ export const QrScannerModal: React.FC<Props> = ({
 
       streamRef.current = stream;
 
-      if (videoRef.current) {
+      const attachAndPlay = async () => {
+        if (!videoRef.current) return false;
         const video = videoRef.current;
         video.srcObject = stream;
         video.setAttribute('playsinline', 'true');
@@ -317,15 +318,20 @@ export const QrScannerModal: React.FC<Props> = ({
         setCameraActive(true);
 
         const track = stream.getVideoTracks()[0];
-        const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
-        setHasTorch(!!capabilities.torch);
+        const capabilities: any = track && track.getCapabilities ? track.getCapabilities() : {};
+        setHasTorch(Boolean(capabilities && capabilities.torch));
 
         // Try continuous auto-focus if supported on Android/iOS
-        if (capabilities.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+        if (capabilities && capabilities.focusMode && Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
           try {
             await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] });
           } catch (_) {}
         }
+        return true;
+      };
+
+      if (!(await attachAndPlay())) {
+        setTimeout(attachAndPlay, 50);
       }
     } catch (err: any) {
       console.warn('Camera access notice:', err);

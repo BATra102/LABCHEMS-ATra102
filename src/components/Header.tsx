@@ -472,6 +472,19 @@ export const Header: React.FC<Props> = ({
 
           {/* Zone 4: Action Buttons, Notification Center, User Profile (Gọn gàng trên cả Mobile & Laptop) */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Chức năng Quét mã nhanh bằng Camera */}
+            {onOpenQrScanner && (
+              <button
+                type="button"
+                onClick={onOpenQrScanner}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-cyan-400/50 bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
+                title="Quét mã QR / Barcode trên chai hóa chất bằng Camera"
+              >
+                <Barcode className="w-3.5 h-3.5 text-cyan-200" />
+                <span className="hidden sm:inline">Quét mã chai</span>
+              </button>
+            )}
+
             {/* Chức năng 1: Quét mã nhập kho (Hiển thị trên màn hình rộng 2xl) */}
             {onOpenSupermarketBarcode && (
               <button

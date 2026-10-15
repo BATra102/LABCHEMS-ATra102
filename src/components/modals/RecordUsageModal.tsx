@@ -107,6 +107,7 @@ export const RecordUsageModal: React.FC<Props> = ({
 
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasTorch, setHasTorch] = useState<boolean>(false);
   const [torchOn, setTorchOn] = useState<boolean>(false);
@@ -305,6 +306,7 @@ export const RecordUsageModal: React.FC<Props> = ({
   // Camera stream controls
   const startCamera = useCallback(async () => {
     setCameraError(null);
+    setPermissionDenied(false);
     setCameraActive(false);
 
     if (streamRef.current) {
@@ -318,34 +320,75 @@ export const RecordUsageModal: React.FC<Props> = ({
     }
 
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: {
-          facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      };
+      let stream: MediaStream;
+      // Tier 1: Try environment camera with ideal resolution
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
+        });
+      } catch (err1) {
+        // Tier 2: Try facingMode string directly
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode },
+          });
+        } catch (err2) {
+          // Tier 3: Fallback to generic video constraint (laptop webcam, strict iOS Safari)
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        }
+      }
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+      const attachAndPlay = async () => {
+        const video = videoRef.current;
+        if (!video) return false;
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.setAttribute('muted', 'true');
+        video.playsInline = true;
+        (video as any).webkitPlaysInline = true;
+        video.muted = true;
+        video.autoplay = true;
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn('Video play interrupted:', playErr);
+        }
+
         setCameraActive(true);
 
         const track = stream.getVideoTracks()[0];
-        const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
-        setHasTorch(!!capabilities.torch);
+        const capabilities: any = track && track.getCapabilities ? track.getCapabilities() : {};
+        setHasTorch(Boolean(capabilities && capabilities.torch));
+        return true;
+      };
+
+      if (!(await attachAndPlay())) {
+        setTimeout(attachAndPlay, 50);
       }
     } catch (err: any) {
+      console.warn('Lỗi mở camera trong RecordUsageModal:', err);
       let errorMsg = 'Không thể mở camera.';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMsg = 'Bạn chưa cấp quyền máy ảnh. Bạn có thể nhập mã chai hoặc chọn hóa chất thủ công.';
-      } else if (err.name === 'NotFoundError') {
+        setPermissionDenied(true);
+        errorMsg = 'Bạn chưa cấp quyền máy ảnh. Nhấn "Cho phép camera / Thử lại" hoặc nhập mã thủ công.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         errorMsg = 'Không tìm thấy thiết bị camera trên máy này.';
+      } else {
+        errorMsg = `Lỗi khởi động camera: ${err.message || 'Thiết bị bận'}. Vui lòng thử lại.`;
       }
       setCameraError(errorMsg);
       setCameraActive(false);
@@ -361,8 +404,28 @@ export const RecordUsageModal: React.FC<Props> = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setCameraActive(false);
+    setTorchOn(false);
+    setHasTorch(false);
   }, []);
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const nextTorch = !torchOn;
+      await (track as any).applyConstraints({
+        advanced: [{ torch: nextTorch } as any],
+      });
+      setTorchOn(nextTorch);
+    } catch (err) {
+      console.warn('Torch not supported or failed:', err);
+    }
+  };
 
   // Frame processing loop
   useEffect(() => {
@@ -729,29 +792,37 @@ export const RecordUsageModal: React.FC<Props> = ({
 
                     <video
                       ref={videoRef}
-                      className={`w-full h-full object-cover ${
+                      playsInline
+                      autoPlay
+                      muted
+                      className={`w-full h-full object-cover transition-opacity duration-300 ${
                         cameraActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
                       }`}
                     />
 
                     {!cameraActive && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-slate-900 text-white">
-                        <Camera className="w-8 h-8 text-slate-400 mb-2" />
-                        <span className="text-xs font-semibold">
-                          {cameraError || 'Đang kết nối camera...'}
-                        </span>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-slate-900 text-white z-10">
+                        <Camera className="w-8 h-8 text-cyan-400 mb-2 animate-pulse" />
+                        <h4 className="text-xs font-bold text-white">
+                          {permissionDenied ? 'Yêu cầu quyền truy cập camera' : cameraError ? 'Không thể mở camera' : 'Đang kết nối camera...'}
+                        </h4>
+                        <p className="text-[11px] text-slate-300 mt-1 max-w-xs leading-relaxed">
+                          {permissionDenied
+                            ? 'Vui lòng nhấn "Cho phép camera / Thử lại" bên dưới để trình duyệt cấp quyền máy ảnh.'
+                            : cameraError || 'Đang kết nối ống kính camera...'}
+                        </p>
                         <div className="mt-3 flex items-center gap-2">
                           <button
                             type="button"
                             onClick={startCamera}
-                            className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 cursor-pointer"
+                            className="px-3.5 py-1.5 text-xs font-bold bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl transition-all shadow-sm cursor-pointer"
                           >
-                            Thử lại
+                            Cho phép camera / Thử lại
                           </button>
                           <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className="px-3 py-1 text-xs bg-cyan-900 text-cyan-200 rounded-lg border border-cyan-800 cursor-pointer"
+                            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 cursor-pointer"
                           >
                             Tải ảnh QR
                           </button>

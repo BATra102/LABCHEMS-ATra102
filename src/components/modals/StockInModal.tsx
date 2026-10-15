@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLab } from '../../context/LabContext';
 import { ChemicalUnit } from '../../types';
 import { COMMON_UNITS } from '../../utils/units';
-import { X, Check, AlertCircle, ShieldAlert, Layers, Settings2, PlusCircle, Building2, DoorClosed, Barcode } from 'lucide-react';
+import { X, Check, AlertCircle, ShieldAlert, Layers, Settings2, PlusCircle, Building2, DoorClosed, Barcode, Camera } from 'lucide-react';
 import { CabinetManagementModal } from './CabinetManagementModal';
 import { SupermarketBarcodeModal } from './SupermarketBarcodeModal';
 
@@ -296,9 +296,20 @@ export const StockInModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Mã chai (Bottle ID)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                  Mã chai (Bottle ID)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setEntryTab('SUPERMARKET')}
+                  className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer hover:underline"
+                  title="Chuyển sang chế độ Camera để quét mã vạch / QR trên chai"
+                >
+                  <Camera className="w-3 h-3 text-emerald-600" />
+                  <span>Quét Camera</span>
+                </button>
+              </div>
               <input
                 type="text"
                 value={bottleCode}
